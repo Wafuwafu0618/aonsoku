@@ -6,16 +6,14 @@ import { devtools, persist, subscribeWithSelector } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { shallow } from 'zustand/shallow'
 import { createWithEqualityFn } from 'zustand/traditional'
-import { scrobble } from '@/service/scrobble'
 import { subsonic } from '@/service/subsonic'
 import { IPlayerContext, ISongList, LoopState } from '@/types/playerContext'
 import { ISong } from '@/types/responses/song'
 import { areSongListsEqual } from '@/utils/compareSongLists'
-import { isDesktop } from '@/utils/desktop'
-import { discordRpc } from '@/utils/discordRpc'
 import { addNextSongList, shuffleSongList } from '@/utils/songListFunctions'
 import { idbStorage } from './idb'
 import { usePlaybackSessionStore } from './playback-session.store'
+import { initializePlayerController } from './player-controller'
 import { usePlayerUiStore } from './player-ui.store'
 
 const miniStores = {
@@ -964,178 +962,11 @@ usePlayerStore.subscribe(
   },
 )
 
-usePlayerStore.subscribe(
-  (state) => [state.songlist],
-  ([songlist]) => {
-    idbStorage.setItem(miniStores.songlist, songlist)
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlayerStore.subscribe(
-  (state) => [state.songlist.currentList, state.songlist.currentSongIndex],
-  () => {
-    const playerStore = usePlayerStore.getState()
-    const { mediaType } = usePlaybackSessionStore.getState()
-    if (mediaType === 'radio' || mediaType === 'podcast') return
-
-    playerStore.actions.checkIsSongStarred()
-    playerStore.actions.setCurrentSong()
-
-    const { currentList } = playerStore.songlist
-    const { progress } = playerStore.playerProgress
-
-    const isSonglistEmpty = currentList.length === 0
-
-    if (isSonglistEmpty) {
-      playerStore.fullscreen.reset()
-    }
-
-    if (isSonglistEmpty && progress > 0) {
-      playerStore.actions.resetProgress()
-    }
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlayerStore.subscribe(
-  ({ songlist }) => [
-    songlist.currentList,
-    songlist.radioList,
-    songlist.podcastList,
-    songlist.currentSongIndex,
-  ],
-  () => {
-    usePlayerStore.getState().actions.updateQueueChecks()
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlayerStore.subscribe(
-  (state) => [state.songlist.currentSong],
-  () => {
-    discordRpc.sendCurrentSong()
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlaybackSessionStore.subscribe(
-  (state) => [state.isPlaying, state.currentDuration],
-  () => {
-    discordRpc.sendCurrentSong()
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlayerStore.subscribe((state, prevState) => {
-  const currentSong = state.songlist.currentSong ?? null
-
-  if (!currentSong) return
-
-  const progress = state.playerProgress.progress
-  const prevProgress = prevState.playerProgress.progress
-  const duration = currentSong.duration
-  const { isPlaying, hasSyncedTheCurrentTrack, hasScrobbledTheCurrentTrack } =
-    usePlaybackSessionStore.getState()
-
-  if (progress >= 1 && prevProgress < 1 && !hasSyncedTheCurrentTrack) {
-    usePlayerStore.getState().actions.setHasSyncedTheCurrentTrack(true)
-
-    scrobble.send(currentSong.id, false)
-  }
-
-  const timeDelta = progress - prevProgress
-
-  if (isPlaying && timeDelta > 0 && timeDelta <= 2) {
-    usePlayerStore.getState().actions.incrementAccumulatedTime(timeDelta)
-  }
-
-  const accumulatedTime = usePlayerStore.getState().listenTime.accumulated
-
-  const halfDuration = duration / 2
-  const fourMinutesInSeconds = 60 * 4
-  const targetTime = Math.min(halfDuration, fourMinutesInSeconds)
-
-  if (
-    duration > 0 &&
-    accumulatedTime >= targetTime &&
-    !hasScrobbledTheCurrentTrack
-  ) {
-    usePlayerStore.getState().actions.setHasScrobbledTheCurrentTrack(true)
-
-    scrobble.send(currentSong.id, true)
-  }
+initializePlayerController({
+  playerStore: usePlayerStore,
+  playbackSessionStore: usePlaybackSessionStore,
+  songlistStorageKey: miniStores.songlist,
 })
-
-function desktopStateListener() {
-  if (!isDesktop()) return
-
-  const { togglePlayPause, playPrevSong, playNextSong } =
-    usePlayerStore.getState().actions
-
-  window.api.playerStateListener((action) => {
-    if (action === 'togglePlayPause') togglePlayPause()
-    if (action === 'skipBackwards') playPrevSong()
-    if (action === 'skipForward') playNextSong()
-  })
-}
-
-desktopStateListener()
-
-function updateDesktopState() {
-  if (!isDesktop()) return
-
-  const { isPlaying, hasPrev, hasNext } = usePlaybackSessionStore.getState()
-  const { currentList, podcastList, radioList } =
-    usePlayerStore.getState().songlist
-
-  const hasSongs = currentList.length >= 1
-  const hasPodcasts = podcastList.length >= 1
-  const hasRadios = radioList.length >= 1
-
-  window.api.updatePlayerState({
-    isPlaying,
-    hasPrevious: hasPrev,
-    hasNext,
-    hasSonglist: hasSongs || hasPodcasts || hasRadios,
-  })
-}
-
-updateDesktopState()
-
-usePlaybackSessionStore.subscribe(
-  (state) => [state.isPlaying, state.hasPrev, state.hasNext],
-  () => {
-    updateDesktopState()
-  },
-  {
-    equalityFn: shallow,
-  },
-)
-
-usePlayerStore.subscribe(
-  ({ songlist }) => [
-    songlist.currentList,
-    songlist.radioList,
-    songlist.podcastList,
-  ],
-  () => {
-    updateDesktopState()
-  },
-  {
-    equalityFn: shallow,
-  },
-)
 
 export const usePlayerActions = () => usePlayerStore((state) => state.actions)
 
