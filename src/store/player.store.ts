@@ -13,6 +13,7 @@ import { areSongListsEqual } from '@/utils/compareSongLists'
 import { addNextSongList, shuffleSongList } from '@/utils/songListFunctions'
 import { idbStorage } from './idb'
 import { usePlaybackSessionStore } from './playback-session.store'
+import { initializePlaybackSessionBridge } from './playback-session-bridge'
 import { initializePlayerController } from './player-controller'
 import { usePlayerUiStore } from './player-ui.store'
 
@@ -918,49 +919,10 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
   shallow,
 )
 
-function syncPlaybackSessionState() {
-  const { playerState, playerProgress } = usePlayerStore.getState()
-
-  usePlaybackSessionStore.getState().actions.sync({
-    isPlaying: playerState.isPlaying,
-    loopState: playerState.loopState,
-    isShuffleActive: playerState.isShuffleActive,
-    isSongStarred: playerState.isSongStarred,
-    volume: playerState.volume,
-    currentDuration: playerState.currentDuration,
-    mediaType: playerState.mediaType,
-    currentPlaybackRate: playerState.currentPlaybackRate,
-    hasPrev: playerState.hasPrev,
-    hasNext: playerState.hasNext,
-    hasSyncedTheCurrentTrack: playerState.hasSyncedTheCurrentTrack,
-    hasScrobbledTheCurrentTrack: playerState.hasScrobbledTheCurrentTrack,
-    progress: playerProgress.progress,
-  })
-}
-
-syncPlaybackSessionState()
-
-usePlayerStore.subscribe(
-  (state) => [
-    state.playerState.isPlaying,
-    state.playerState.loopState,
-    state.playerState.isShuffleActive,
-    state.playerState.isSongStarred,
-    state.playerState.volume,
-    state.playerState.currentDuration,
-    state.playerState.mediaType,
-    state.playerState.currentPlaybackRate,
-    state.playerState.hasPrev,
-    state.playerState.hasNext,
-    state.playerState.hasSyncedTheCurrentTrack,
-    state.playerState.hasScrobbledTheCurrentTrack,
-    state.playerProgress.progress,
-  ],
-  syncPlaybackSessionState,
-  {
-    equalityFn: shallow,
-  },
-)
+initializePlaybackSessionBridge({
+  playerStore: usePlayerStore,
+  playbackSessionStore: usePlaybackSessionStore,
+})
 
 initializePlayerController({
   playerStore: usePlayerStore,

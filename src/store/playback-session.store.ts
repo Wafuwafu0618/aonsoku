@@ -4,7 +4,7 @@ import { LoopState } from '@/types/playerContext'
 
 type MediaType = 'song' | 'radio' | 'podcast'
 
-interface PlaybackSessionValues {
+export interface PlaybackSessionValues {
   isPlaying: boolean
   loopState: LoopState
   isShuffleActive: boolean
@@ -25,7 +25,7 @@ interface PlaybackSessionActions {
   reset: () => void
 }
 
-interface PlaybackSessionState extends PlaybackSessionValues {
+export interface PlaybackSessionState extends PlaybackSessionValues {
   actions: PlaybackSessionActions
 }
 
