@@ -15,6 +15,7 @@ import { isDesktop } from '@/utils/desktop'
 import { discordRpc } from '@/utils/discordRpc'
 import { addNextSongList, shuffleSongList } from '@/utils/songListFunctions'
 import { idbStorage } from './idb'
+import { usePlayerUiStore } from './player-ui.store'
 
 const miniStores = {
   songlist: 'player_songlist',
@@ -63,14 +64,10 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
           fullscreen: {
             isFullscreen: false,
             setIsFullscreen: (value) => {
-              set((state) => {
-                state.fullscreen.isFullscreen = value
-              })
+              usePlayerUiStore.getState().actions.setIsFullscreen(value)
             },
             reset: () => {
-              set((state) => {
-                state.fullscreen.isFullscreen = false
-              })
+              usePlayerUiStore.getState().actions.resetFullscreen()
             },
           },
           playerProgress: {
@@ -773,66 +770,25 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             setMainDrawerState: (status) => {
-              set((state) => {
-                state.playerState.mainDrawerState = status
-              })
+              usePlayerUiStore.getState().actions.setMainDrawerState(status)
             },
             setQueueState: (status) => {
-              set((state) => {
-                state.playerState.queueState = status
-              })
+              usePlayerUiStore.getState().actions.setQueueState(status)
             },
             toggleQueueAction: () => {
-              const { mainDrawerState, lyricsState, queueState } =
-                get().playerState
-              const {
-                toggleQueueAndLyrics,
-                setQueueState,
-                setMainDrawerState,
-              } = get().actions
-
-              if (mainDrawerState && lyricsState) {
-                toggleQueueAndLyrics()
-              } else {
-                setQueueState(!queueState)
-                setMainDrawerState(!mainDrawerState)
-              }
+              usePlayerUiStore.getState().actions.toggleQueueAction()
             },
             setLyricsState: (status) => {
-              set((state) => {
-                state.playerState.lyricsState = status
-              })
+              usePlayerUiStore.getState().actions.setLyricsState(status)
             },
             toggleLyricsAction: () => {
-              const { mainDrawerState, lyricsState, queueState } =
-                get().playerState
-              const {
-                toggleQueueAndLyrics,
-                setLyricsState,
-                setMainDrawerState,
-              } = get().actions
-
-              if (mainDrawerState && queueState) {
-                toggleQueueAndLyrics()
-              } else {
-                setLyricsState(!lyricsState)
-                setMainDrawerState(!mainDrawerState)
-              }
+              usePlayerUiStore.getState().actions.toggleLyricsAction()
             },
             toggleQueueAndLyrics: () => {
-              const { queueState, lyricsState } = get().playerState
-
-              set((state) => {
-                state.playerState.queueState = !queueState
-                state.playerState.lyricsState = !lyricsState
-              })
+              usePlayerUiStore.getState().actions.toggleQueueAndLyrics()
             },
             closeDrawer: () => {
-              set((state) => {
-                state.playerState.mainDrawerState = false
-                state.playerState.queueState = false
-                state.playerState.lyricsState = false
-              })
+              usePlayerUiStore.getState().actions.closeDrawer()
             },
             setHasSyncedTheCurrentTrack: (value) => {
               set((state) => {
@@ -1237,23 +1193,23 @@ export const usePlayerRef = () =>
 export const getVolume = () => usePlayerStore.getState().playerState.volume
 
 export const useMainDrawerState = () =>
-  usePlayerStore((state) => ({
-    mainDrawerState: state.playerState.mainDrawerState,
+  usePlayerUiStore((state) => ({
+    mainDrawerState: state.mainDrawerState,
     setMainDrawerState: state.actions.setMainDrawerState,
     toggleQueueAndLyrics: state.actions.toggleQueueAndLyrics,
     closeDrawer: state.actions.closeDrawer,
   }))
 
 export const useQueueState = () =>
-  usePlayerStore((state) => ({
-    queueState: state.playerState.queueState,
+  usePlayerUiStore((state) => ({
+    queueState: state.queueState,
     setQueueState: state.actions.setQueueState,
     toggleQueueAction: state.actions.toggleQueueAction,
   }))
 
 export const useLyricsState = () =>
-  usePlayerStore((state) => ({
-    lyricsState: state.playerState.lyricsState,
+  usePlayerUiStore((state) => ({
+    lyricsState: state.lyricsState,
     setLyricsState: state.actions.setLyricsState,
     toggleLyricsAction: state.actions.toggleLyricsAction,
   }))
@@ -1289,4 +1245,8 @@ export const usePlayerCurrentList = () =>
   usePlayerStore((state) => state.songlist.currentList)
 
 export const usePlayerFullscreen = () =>
-  usePlayerStore((state) => state.fullscreen)
+  usePlayerUiStore((state) => ({
+    isFullscreen: state.isFullscreen,
+    setIsFullscreen: state.actions.setIsFullscreen,
+    reset: state.actions.resetFullscreen,
+  }))
