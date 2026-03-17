@@ -7,6 +7,7 @@ import { TrackInfo } from '@/app/components/player/track-info'
 import { podcasts } from '@/service/podcasts'
 import {
   getVolume,
+  usePlaybackQueueState,
   usePlayerActions,
   usePlayerIsPlaying,
   usePlayerLoop,
@@ -60,6 +61,7 @@ export function Player() {
   } = usePlayerActions()
   const { currentList, currentSongIndex, radioList, podcastList } =
     usePlayerSonglist()
+  const { currentQueueItem } = usePlaybackQueueState()
   const isPlaying = usePlayerIsPlaying()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const loopState = usePlayerLoop()
@@ -68,6 +70,7 @@ export function Player() {
     useReplayGainState()
 
   const song = currentList[currentSongIndex]
+  const currentSongSourceId = currentQueueItem?.sourceId ?? song?.id ?? ''
   const radio = radioList[currentSongIndex]
   const podcast = podcastList[currentSongIndex]
 
@@ -239,7 +242,7 @@ export function Player() {
       {isSong && song && (
         <AudioPlayer
           replayGain={trackReplayGain}
-          src={getSongStreamUrl(song.id)}
+          src={getSongStreamUrl(currentSongSourceId)}
           autoPlay={isPlaying}
           audioRef={audioRef}
           loop={loopState === LoopState.One}

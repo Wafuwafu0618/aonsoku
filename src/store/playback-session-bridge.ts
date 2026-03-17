@@ -1,4 +1,5 @@
 import { shallow } from 'zustand/shallow'
+import { mapNavidromeSongsToQueueItems } from '@/domain/mappers/navidrome'
 import { IPlayerContext } from '@/types/playerContext'
 import {
   PlaybackSessionState,
@@ -25,6 +26,20 @@ let initialized = false
 function mapPlayerStoreToPlaybackSessionValues(
   state: IPlayerContext,
 ): PlaybackSessionValues {
+  const isSong = state.playerState.mediaType === 'song'
+  const queueItems = isSong
+    ? mapNavidromeSongsToQueueItems(state.songlist.currentList)
+    : []
+
+  const hasQueueItems = queueItems.length > 0
+  const currentQueueIndex = hasQueueItems
+    ? Math.min(
+        Math.max(state.songlist.currentSongIndex, 0),
+        queueItems.length - 1,
+      )
+    : 0
+  const currentQueueItem = hasQueueItems ? queueItems[currentQueueIndex] : null
+
   return {
     isPlaying: state.playerState.isPlaying,
     loopState: state.playerState.loopState,
@@ -39,6 +54,9 @@ function mapPlayerStoreToPlaybackSessionValues(
     hasSyncedTheCurrentTrack: state.playerState.hasSyncedTheCurrentTrack,
     hasScrobbledTheCurrentTrack: state.playerState.hasScrobbledTheCurrentTrack,
     progress: state.playerProgress.progress,
+    queueItems,
+    currentQueueIndex,
+    currentQueueItem,
   }
 }
 
@@ -74,6 +92,8 @@ export function initializePlaybackSessionBridge({
       state.playerState.hasSyncedTheCurrentTrack,
       state.playerState.hasScrobbledTheCurrentTrack,
       state.playerProgress.progress,
+      state.songlist.currentList,
+      state.songlist.currentSongIndex,
     ],
     syncPlaybackSessionState,
     {

@@ -1,5 +1,6 @@
 import { shallow } from 'zustand/shallow'
 import { createWithEqualityFn } from 'zustand/traditional'
+import { QueueItem } from '@/domain/entities/queue-item'
 import { LoopState } from '@/types/playerContext'
 
 type MediaType = 'song' | 'radio' | 'podcast'
@@ -18,6 +19,9 @@ export interface PlaybackSessionValues {
   hasSyncedTheCurrentTrack: boolean
   hasScrobbledTheCurrentTrack: boolean
   progress: number
+  queueItems: QueueItem[]
+  currentQueueIndex: number
+  currentQueueItem: QueueItem | null
 }
 
 interface PlaybackSessionActions {
@@ -43,6 +47,9 @@ const initialPlaybackSessionValues: PlaybackSessionValues = {
   hasSyncedTheCurrentTrack: false,
   hasScrobbledTheCurrentTrack: false,
   progress: 0,
+  queueItems: [],
+  currentQueueIndex: 0,
+  currentQueueItem: null,
 }
 
 export const usePlaybackSessionStore =

@@ -15,6 +15,12 @@ import {
   setCurrentAudioElement,
 } from './audio-element-registry'
 import { idbStorage } from './idb'
+import {
+  runHandleSongEnded,
+  runPlayNextSong,
+  runPlayPrevSong,
+  runTogglePlayPause,
+} from './playback-command-controller'
 import { usePlaybackSessionStore } from './playback-session.store'
 import { initializePlaybackSessionBridge } from './playback-session-bridge'
 import { initializePlayerController } from './player-controller'
@@ -444,8 +450,11 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             togglePlayPause: () => {
-              set((state) => {
-                state.playerState.isPlaying = !state.playerState.isPlaying
+              const { isPlaying } = usePlaybackSessionStore.getState()
+
+              runTogglePlayPause({
+                isPlaying,
+                setPlayingState: get().actions.setPlayingState,
               })
             },
             toggleLoop: () => {
@@ -504,19 +513,20 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 resetAccumulatedTime,
               } = get().actions
 
-              resetAccumulatedTime()
-              setHasSyncedTheCurrentTrack(false)
-              setHasScrobbledTheCurrentTrack(false)
-
-              if (hasNextSong()) {
-                resetProgress()
-                set((state) => {
-                  state.songlist.currentSongIndex += 1
-                })
-              } else if (loopState === LoopState.All) {
-                resetProgress()
-                playFirstSongInQueue()
-              }
+              runPlayNextSong({
+                loopState,
+                hasNextSong,
+                resetProgress,
+                playFirstSongInQueue,
+                setHasSyncedTheCurrentTrack,
+                setHasScrobbledTheCurrentTrack,
+                resetAccumulatedTime,
+                incrementSongIndex: () => {
+                  set((state) => {
+                    state.songlist.currentSongIndex += 1
+                  })
+                },
+              })
             },
             playPrevSong: () => {
               const {
@@ -525,18 +535,19 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 setHasSyncedTheCurrentTrack,
                 setHasScrobbledTheCurrentTrack,
               } = get().actions
-              const hasPrevSong = get().actions.hasPrevSong()
 
-              if (hasPrevSong) {
-                resetProgress()
-                resetAccumulatedTime()
-                setHasSyncedTheCurrentTrack(false)
-                setHasScrobbledTheCurrentTrack(false)
-
-                set((state) => {
-                  state.songlist.currentSongIndex -= 1
-                })
-              }
+              runPlayPrevSong({
+                hasPrevSong: get().actions.hasPrevSong,
+                resetProgress,
+                resetAccumulatedTime,
+                setHasSyncedTheCurrentTrack,
+                setHasScrobbledTheCurrentTrack,
+                decrementSongIndex: () => {
+                  set((state) => {
+                    state.songlist.currentSongIndex -= 1
+                  })
+                },
+              })
             },
             clearPlayerState: () => {
               set((state) => {
@@ -833,13 +844,13 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 clearPlayerState,
               } = get().actions
 
-              if (hasNextSong() || loopState === LoopState.All) {
-                playNextSong()
-                setPlayingState(true)
-              } else {
-                clearPlayerState()
-                setPlayingState(false)
-              }
+              runHandleSongEnded({
+                loopState,
+                hasNextSong,
+                playNextSong,
+                setPlayingState,
+                clearPlayerState,
+              })
             },
             getCurrentProgress: () => {
               return get().playerProgress.progress
@@ -1046,6 +1057,13 @@ export const usePlayerPrevAndNext = () =>
   usePlaybackSessionStore((state) => ({
     hasPrev: state.hasPrev,
     hasNext: state.hasNext,
+  }))
+
+export const usePlaybackQueueState = () =>
+  usePlaybackSessionStore((state) => ({
+    queueItems: state.queueItems,
+    currentQueueIndex: state.currentQueueIndex,
+    currentQueueItem: state.currentQueueItem,
   }))
 
 export const getVolume = () => usePlaybackSessionStore.getState().volume
