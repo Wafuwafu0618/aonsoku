@@ -192,7 +192,19 @@ describe('Player Component', () => {
       cy.getByTestId<HTMLAudioElement>('player-song-audio').then(($audio) => {
         const $el = $audio[0]
 
-        expect($el.loop, 'Loop state should be true').to.equal(true)
+        expect($el.loop, 'Loop state should be false on loop all').to.equal(
+          false,
+        )
+      })
+
+      cy.get('@loopButton').click()
+
+      cy.getByTestId<HTMLAudioElement>('player-song-audio').then(($audio) => {
+        const $el = $audio[0]
+
+        expect($el.loop, 'Loop state should be true on loop one').to.equal(
+          true,
+        )
       })
     })
   })
@@ -264,10 +276,9 @@ describe('Player Component', () => {
         .should('be.visible')
         .and('have.text', songs[1].title)
 
-      cy.wrap(usePlayerStore.getState().songlist.currentSongIndex).should(
-        'equal',
-        1,
-      )
+      cy.then(() => {
+        expect(usePlayerStore.getState().songlist.currentSongIndex).to.equal(1)
+      })
 
       cy.getByTestId('player-button-prev').click()
 
@@ -276,10 +287,9 @@ describe('Player Component', () => {
         .should('be.visible')
         .and('have.text', songs[0].title)
 
-      cy.wrap(usePlayerStore.getState().songlist.currentSongIndex).should(
-        'equal',
-        0,
-      )
+      cy.then(() => {
+        expect(usePlayerStore.getState().songlist.currentSongIndex).to.equal(0)
+      })
     })
   })
 })

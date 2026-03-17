@@ -242,12 +242,6 @@ export function Player() {
           autoPlay={isPlaying}
           audioRef={audioRef}
           loop={loopState === LoopState.One}
-          onPlay={() => setPlayingState(true)}
-          onPause={() => setPlayingState(false)}
-          onLoadedMetadata={setupDuration}
-          onTimeUpdate={setupProgress}
-          onEnded={handleSongEnded}
-          onLoadStart={setupInitialVolume}
           data-testid="player-song-audio"
         />
       )}
