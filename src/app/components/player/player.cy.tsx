@@ -244,4 +244,42 @@ describe('Player Component', () => {
         .and('have.class', 'fill-red-500')
     })
   })
+
+  it('should move forward and backward through the queue', () => {
+    cy.fixture('songs/random').then((songs: ISong[]) => {
+      usePlayerStore.getState().actions.setSongList(songs, 0)
+      usePlayerStore.getState().actions.setPlayingState(false)
+
+      cy.mount(<Player />)
+
+      cy.getByTestId('track-title')
+        .eq(1)
+        .should('be.visible')
+        .and('have.text', songs[0].title)
+
+      cy.getByTestId('player-button-next').click()
+
+      cy.getByTestId('track-title')
+        .eq(1)
+        .should('be.visible')
+        .and('have.text', songs[1].title)
+
+      cy.wrap(usePlayerStore.getState().songlist.currentSongIndex).should(
+        'equal',
+        1,
+      )
+
+      cy.getByTestId('player-button-prev').click()
+
+      cy.getByTestId('track-title')
+        .eq(1)
+        .should('be.visible')
+        .and('have.text', songs[0].title)
+
+      cy.wrap(usePlayerStore.getState().songlist.currentSongIndex).should(
+        'equal',
+        0,
+      )
+    })
+  })
 })
