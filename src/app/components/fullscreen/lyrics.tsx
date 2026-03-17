@@ -9,7 +9,11 @@ import {
   scrollAreaViewportSelector,
 } from '@/app/components/ui/scroll-area'
 import { subsonic } from '@/service/subsonic'
-import { usePlayerRef, usePlayerSonglist } from '@/store/player.store'
+import {
+  usePlayerActions,
+  usePlayerProgress,
+  usePlayerSonglist,
+} from '@/store/player.store'
 import { ILyric } from '@/types/responses/song'
 
 interface LyricProps {
@@ -50,23 +54,20 @@ export function LyricsTab() {
 }
 
 function SyncedLyrics({ lyrics }: LyricProps) {
-  const playerRef = usePlayerRef()
+  const progressSeconds = usePlayerProgress()
+  const { seekTo } = usePlayerActions()
   const [progress, setProgress] = useState(0)
 
-  setTimeout(() => {
-    let newProgress = (playerRef?.currentTime || 0) * 1000
+  useEffect(() => {
+    const nextProgress = Math.floor(progressSeconds * 1000)
 
-    if (newProgress === progress) {
-      newProgress += 1 // Prevents the lyrics from getting stuck when the audio is still loading
-    }
-
-    setProgress(newProgress)
-  }, 50)
+    setProgress((currentProgress) =>
+      currentProgress === nextProgress ? nextProgress + 1 : nextProgress,
+    )
+  }, [progressSeconds])
 
   const skipToTime = (timeMs: number) => {
-    if (playerRef) {
-      playerRef!.currentTime = timeMs / 1000
-    }
+    seekTo(timeMs / 1000)
   }
 
   return (

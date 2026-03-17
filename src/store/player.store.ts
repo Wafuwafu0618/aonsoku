@@ -1,4 +1,3 @@
-import { produce } from 'immer'
 import clamp from 'lodash/clamp'
 import merge from 'lodash/merge'
 import omit from 'lodash/omit'
@@ -11,6 +10,10 @@ import { IPlayerContext, ISongList, LoopState } from '@/types/playerContext'
 import { ISong } from '@/types/responses/song'
 import { areSongListsEqual } from '@/utils/compareSongLists'
 import { addNextSongList, shuffleSongList } from '@/utils/songListFunctions'
+import {
+  getCurrentAudioElement,
+  setCurrentAudioElement,
+} from './audio-element-registry'
 import { idbStorage } from './idb'
 import { usePlaybackSessionStore } from './playback-session.store'
 import { initializePlaybackSessionBridge } from './playback-session-bridge'
@@ -51,7 +54,6 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             volume: 100,
             currentDuration: 0,
             mediaType: 'song',
-            audioPlayerRef: null,
             hasSyncedTheCurrentTrack: false,
             hasScrobbledTheCurrentTrack: false,
             currentPlaybackRate: 1,
@@ -554,10 +556,11 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.playerState.hasSyncedTheCurrentTrack = false
                 state.playerState.hasScrobbledTheCurrentTrack = false
                 state.playerState.currentDuration = 0
-                state.playerState.audioPlayerRef = null
                 state.settings.colors.currentSongColor = null
                 state.listenTime.accumulated = 0
               })
+
+              setCurrentAudioElement(null)
             },
             resetProgress: () => {
               set((state) => {
@@ -568,6 +571,22 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               set((state) => {
                 state.playerProgress.progress = progress
               })
+            },
+            seekTo: (progress) => {
+              const audioPlayerRef = getCurrentAudioElement()
+              const { mediaType } = usePlaybackSessionStore.getState()
+
+              if (audioPlayerRef) {
+                audioPlayerRef.currentTime = progress
+              }
+
+              set((state) => {
+                state.playerProgress.progress = progress
+              })
+
+              if (mediaType === 'podcast') {
+                get().actions.setUpdatePodcastProgress(progress)
+              }
             },
             setVolume: (volume) => {
               set((state) => {
@@ -697,11 +716,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             setAudioPlayerRef: (audioPlayer) => {
-              set(
-                produce((state: IPlayerContext) => {
-                  state.playerState.audioPlayerRef = audioPlayer
-                }),
-              )
+              setCurrentAudioElement(audioPlayer)
             },
             removeSongFromQueue: (id) => {
               const {
@@ -907,7 +922,6 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             'songlist',
             'actions',
             'playerState.isPlaying',
-            'playerState.audioPlayerRef',
             'state.settings.colors.bigPlayer.blur.settings',
           ])
 
@@ -1033,9 +1047,6 @@ export const usePlayerPrevAndNext = () =>
     hasPrev: state.hasPrev,
     hasNext: state.hasNext,
   }))
-
-export const usePlayerRef = () =>
-  usePlayerStore((state) => state.playerState.audioPlayerRef)
 
 export const getVolume = () => usePlaybackSessionStore.getState().volume
 

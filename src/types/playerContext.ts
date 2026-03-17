@@ -29,7 +29,6 @@ export interface IPlayerState {
   currentDuration: number
   mediaType: 'song' | 'radio' | 'podcast'
   currentPlaybackRate: number
-  audioPlayerRef: HTMLAudioElement | null
   hasSyncedTheCurrentTrack: boolean
   hasScrobbledTheCurrentTrack: boolean
   hasPrev: boolean
@@ -157,11 +156,12 @@ export interface IPlayerActions {
   clearPlayerState: () => void
   resetProgress: () => void
   setProgress: (progress: number) => void
+  seekTo: (progress: number) => void
   setVolume: (volume: number) => void
   handleVolumeWheel: (isScrollingDown: boolean) => void
   setCurrentDuration: (duration: number) => void
   setPlayRadio: (list: Radio[], index: number) => void
-  setAudioPlayerRef: (ref: HTMLAudioElement) => void
+  setAudioPlayerRef: (ref: HTMLAudioElement | null) => void
   setNextOnQueue: (songlist: ISong[]) => void
   setLastOnQueue: (songlist: ISong[]) => void
   removeSongFromQueue: (id: string) => void

@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { RefObject, useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ProgressSlider } from '@/app/components/ui/slider'
 import { podcasts } from '@/service/podcasts'
 import {
@@ -12,32 +12,18 @@ import {
 import { convertSecondsToTime } from '@/utils/convertSecondsToTime'
 import { logger } from '@/utils/logger'
 
-interface PlayerProgressProps {
-  audioRef: RefObject<HTMLAudioElement>
-}
-
 let isSeeking = false
 
-export function PlayerProgress({ audioRef }: PlayerProgressProps) {
+export function PlayerProgress() {
   const progress = usePlayerProgress()
   const [localProgress, setLocalProgress] = useState(progress)
   const currentDuration = usePlayerDuration()
   const { currentList, podcastList, currentSongIndex } = usePlayerSonglist()
   const { isSong, isPodcast } = usePlayerMediaType()
-  const { setProgress, setUpdatePodcastProgress, getCurrentPodcastProgress } =
+  const { seekTo, setUpdatePodcastProgress, getCurrentPodcastProgress } =
     usePlayerActions()
 
   const isEmpty = isSong && currentList.length === 0
-
-  const updateAudioCurrentTime = useCallback(
-    (value: number) => {
-      isSeeking = false
-      if (audioRef.current) {
-        audioRef.current.currentTime = value
-      }
-    },
-    [audioRef],
-  )
 
   const handleSeeking = useCallback((amount: number) => {
     isSeeking = true
@@ -46,19 +32,19 @@ export function PlayerProgress({ audioRef }: PlayerProgressProps) {
 
   const handleSeeked = useCallback(
     (amount: number) => {
-      updateAudioCurrentTime(amount)
-      setProgress(amount)
+      isSeeking = false
+      seekTo(amount)
       setLocalProgress(amount)
     },
-    [setProgress, updateAudioCurrentTime],
+    [seekTo],
   )
 
   const handleSeekedFallback = useCallback(() => {
     if (localProgress !== progress) {
-      updateAudioCurrentTime(localProgress)
-      setProgress(localProgress)
+      isSeeking = false
+      seekTo(localProgress)
     }
-  }, [localProgress, progress, setProgress, updateAudioCurrentTime])
+  }, [localProgress, progress, seekTo])
 
   const songDuration = useMemo(
     () => convertSecondsToTime(currentDuration ?? 0),

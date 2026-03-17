@@ -4,7 +4,6 @@ import {
   usePlayerActions,
   usePlayerDuration,
   usePlayerProgress,
-  usePlayerRef,
 } from '@/store/player.store'
 import { convertSecondsToTime } from '@/utils/convertSecondsToTime'
 
@@ -13,19 +12,8 @@ let isSeeking = false
 export function FullscreenProgress() {
   const progress = usePlayerProgress()
   const [localProgress, setLocalProgress] = useState(progress)
-  const audioPlayerRef = usePlayerRef()
   const currentDuration = usePlayerDuration()
-  const { setProgress } = usePlayerActions()
-
-  const updateAudioCurrentTime = useCallback(
-    (value: number) => {
-      isSeeking = false
-      if (audioPlayerRef) {
-        audioPlayerRef.currentTime = value
-      }
-    },
-    [audioPlayerRef],
-  )
+  const { seekTo } = usePlayerActions()
 
   const handleSeeking = useCallback((amount: number) => {
     isSeeking = true
@@ -34,19 +22,19 @@ export function FullscreenProgress() {
 
   const handleSeeked = useCallback(
     (amount: number) => {
-      updateAudioCurrentTime(amount)
-      setProgress(amount)
+      isSeeking = false
+      seekTo(amount)
       setLocalProgress(amount)
     },
-    [setProgress, updateAudioCurrentTime],
+    [seekTo],
   )
 
   const handleSeekedFallback = useCallback(() => {
     if (localProgress !== progress) {
-      updateAudioCurrentTime(localProgress)
-      setProgress(localProgress)
+      isSeeking = false
+      seekTo(localProgress)
     }
-  }, [localProgress, progress, setProgress, updateAudioCurrentTime])
+  }, [localProgress, progress, seekTo])
 
   const currentTime = convertSecondsToTime(isSeeking ? localProgress : progress)
 

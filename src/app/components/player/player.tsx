@@ -12,7 +12,6 @@ import {
   usePlayerLoop,
   usePlayerMediaType,
   usePlayerPlaybackRate,
-  usePlayerRef,
   usePlayerSonglist,
   useReplayGainState,
 } from '@/store/player.store'
@@ -64,7 +63,6 @@ export function Player() {
   const isPlaying = usePlayerIsPlaying()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const loopState = usePlayerLoop()
-  const audioPlayerRef = usePlayerRef()
   const currentPlaybackRate = usePlayerPlaybackRate()
   const { replayGainType, replayGainPreAmp, replayGainDefaultGain } =
     useReplayGainState()
@@ -84,9 +82,14 @@ export function Player() {
   useEffect(() => {
     if (!isSong && !song) return
 
-    if (audioPlayerRef === null && audioRef.current)
+    if (audioRef.current) {
       setAudioPlayerRef(audioRef.current)
-  }, [audioPlayerRef, audioRef, isSong, setAudioPlayerRef, song])
+    }
+
+    return () => {
+      setAudioPlayerRef(null)
+    }
+  }, [audioRef, isSong, setAudioPlayerRef, song])
 
   useEffect(() => {
     const audio = podcastRef.current
@@ -205,9 +208,7 @@ export function Player() {
             audioRef={getAudioRef()}
           />
 
-          {(isSong || isPodcast) && (
-            <MemoPlayerProgress audioRef={getAudioRef()} />
-          )}
+          {(isSong || isPodcast) && <MemoPlayerProgress />}
         </div>
         {/* Remain Controls and Volume */}
         <div className="flex items-center w-full justify-end">
