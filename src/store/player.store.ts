@@ -15,6 +15,7 @@ import { isDesktop } from '@/utils/desktop'
 import { discordRpc } from '@/utils/discordRpc'
 import { addNextSongList, shuffleSongList } from '@/utils/songListFunctions'
 import { idbStorage } from './idb'
+import { usePlaybackSessionStore } from './playback-session.store'
 import { usePlayerUiStore } from './player-ui.store'
 
 const miniStores = {
@@ -52,9 +53,6 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             currentDuration: 0,
             mediaType: 'song',
             audioPlayerRef: null,
-            mainDrawerState: false,
-            queueState: false,
-            lyricsState: false,
             hasSyncedTheCurrentTrack: false,
             hasScrobbledTheCurrentTrack: false,
             currentPlaybackRate: 1,
@@ -232,7 +230,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               }
             },
             playSong: (song) => {
-              const { isPlaying } = get().playerState
+              const { isPlaying } = usePlaybackSessionStore.getState()
               const songIsAlreadyPlaying = get().actions.checkActiveSong(
                 song.id,
               )
@@ -289,7 +287,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.songlist.originalList = newOriginalList
               })
 
-              const { isPlaying } = get().playerState
+              const { isPlaying } = usePlaybackSessionStore.getState()
 
               if (!isPlaying) {
                 get().actions.setPlayingState(true)
@@ -311,14 +309,14 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.songlist.originalList = newOriginalList
               })
 
-              const { isPlaying } = get().playerState
+              const { isPlaying } = usePlaybackSessionStore.getState()
 
               if (!isPlaying) {
                 get().actions.setPlayingState(true)
               }
             },
             setPlayRadio: (list, index) => {
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               const { radioList, currentSongIndex } = get().songlist
 
               if (
@@ -341,7 +339,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             setPlayPodcast: (list, index, progress) => {
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               const { podcastList, currentSongIndex } = get().songlist
 
               if (
@@ -365,7 +363,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             setUpdatePodcastProgress: (progress) => {
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               if (mediaType !== 'podcast') return
 
               const { currentSongIndex } = get().songlist
@@ -376,7 +374,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             getCurrentPodcastProgress: () => {
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               if (mediaType !== 'podcast') return 0
 
               const { podcastListProgresses, currentSongIndex } = get().songlist
@@ -407,7 +405,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.songlist.podcastListProgresses[nextIndex] = progress
               })
 
-              const { isPlaying } = get().playerState
+              const { isPlaying } = usePlaybackSessionStore.getState()
 
               if (!isPlaying) {
                 get().actions.setPlayingState(true)
@@ -433,7 +431,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.songlist.podcastListProgresses[lastIndex] = progress
               })
 
-              const { isPlaying } = get().playerState
+              const { isPlaying } = usePlaybackSessionStore.getState()
 
               if (!isPlaying) {
                 get().actions.setPlayingState(true)
@@ -450,7 +448,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             toggleLoop: () => {
-              const { loopState } = get().playerState
+              const { loopState } = usePlaybackSessionStore.getState()
 
               // Cycles to the next state
               const newState =
@@ -461,7 +459,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             toggleShuffle: () => {
-              const { isShuffleActive } = get().playerState
+              const { isShuffleActive } = usePlaybackSessionStore.getState()
               const { currentList, currentSongIndex } = get().songlist
 
               const listLength = currentList.length
@@ -495,7 +493,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               }
             },
             playNextSong: () => {
-              const { loopState } = get().playerState
+              const { loopState } = usePlaybackSessionStore.getState()
               const {
                 hasNextSong,
                 resetProgress,
@@ -554,9 +552,6 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 state.playerState.isPlaying = false
                 state.playerState.loopState = LoopState.Off
                 state.playerState.isShuffleActive = false
-                state.playerState.mainDrawerState = false
-                state.playerState.queueState = false
-                state.playerState.lyricsState = false
                 state.playerState.hasSyncedTheCurrentTrack = false
                 state.playerState.hasScrobbledTheCurrentTrack = false
                 state.playerState.currentDuration = 0
@@ -582,7 +577,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             },
             handleVolumeWheel: (isScrollingDown) => {
               const { min, max, wheelStep } = get().settings.volume
-              const { volume } = get().playerState
+              const { volume } = usePlaybackSessionStore.getState()
 
               if (isScrollingDown && volume === min) return
               if (!isScrollingDown && volume === max) return
@@ -601,7 +596,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             hasNextSong: () => {
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               const { currentList, currentSongIndex, radioList, podcastList } =
                 get().songlist
 
@@ -637,7 +632,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             },
             checkIsSongStarred: () => {
               const { currentList, currentSongIndex } = get().songlist
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
               const song = currentList[currentSongIndex]
 
               if (mediaType === 'song' && song) {
@@ -654,7 +649,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             },
             starSongInQueue: (id) => {
               const { currentList } = get().songlist
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
 
               if (currentList.length === 0 && mediaType !== 'song') return
 
@@ -676,7 +671,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             },
             starCurrentSong: async () => {
               const { currentList, currentSongIndex } = get().songlist
-              const { mediaType } = get().playerState
+              const { mediaType } = usePlaybackSessionStore.getState()
 
               if (currentList.length === 0 && mediaType !== 'song') return
 
@@ -816,7 +811,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             handleSongEnded: () => {
-              const { loopState } = get().playerState
+              const { loopState } = usePlaybackSessionStore.getState()
               const {
                 hasNextSong,
                 playNextSong,
@@ -914,9 +909,6 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
             'actions',
             'playerState.isPlaying',
             'playerState.audioPlayerRef',
-            'playerState.mainDrawerState',
-            'playerState.queueState',
-            'playerState.lyricsState',
             'state.settings.colors.bigPlayer.blur.settings',
           ])
 
@@ -926,6 +918,50 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
     ),
   ),
   shallow,
+)
+
+function syncPlaybackSessionState() {
+  const { playerState, playerProgress } = usePlayerStore.getState()
+
+  usePlaybackSessionStore.getState().actions.sync({
+    isPlaying: playerState.isPlaying,
+    loopState: playerState.loopState,
+    isShuffleActive: playerState.isShuffleActive,
+    isSongStarred: playerState.isSongStarred,
+    volume: playerState.volume,
+    currentDuration: playerState.currentDuration,
+    mediaType: playerState.mediaType,
+    currentPlaybackRate: playerState.currentPlaybackRate,
+    hasPrev: playerState.hasPrev,
+    hasNext: playerState.hasNext,
+    hasSyncedTheCurrentTrack: playerState.hasSyncedTheCurrentTrack,
+    hasScrobbledTheCurrentTrack: playerState.hasScrobbledTheCurrentTrack,
+    progress: playerProgress.progress,
+  })
+}
+
+syncPlaybackSessionState()
+
+usePlayerStore.subscribe(
+  (state) => [
+    state.playerState.isPlaying,
+    state.playerState.loopState,
+    state.playerState.isShuffleActive,
+    state.playerState.isSongStarred,
+    state.playerState.volume,
+    state.playerState.currentDuration,
+    state.playerState.mediaType,
+    state.playerState.currentPlaybackRate,
+    state.playerState.hasPrev,
+    state.playerState.hasNext,
+    state.playerState.hasSyncedTheCurrentTrack,
+    state.playerState.hasScrobbledTheCurrentTrack,
+    state.playerProgress.progress,
+  ],
+  syncPlaybackSessionState,
+  {
+    equalityFn: shallow,
+  },
 )
 
 usePlayerStore.subscribe(
@@ -942,7 +978,7 @@ usePlayerStore.subscribe(
   (state) => [state.songlist.currentList, state.songlist.currentSongIndex],
   () => {
     const playerStore = usePlayerStore.getState()
-    const { mediaType } = playerStore.playerState
+    const { mediaType } = usePlaybackSessionStore.getState()
     if (mediaType === 'radio' || mediaType === 'podcast') return
 
     playerStore.actions.checkIsSongStarred()
@@ -982,11 +1018,17 @@ usePlayerStore.subscribe(
 )
 
 usePlayerStore.subscribe(
-  (state) => [
-    state.songlist.currentSong,
-    state.playerState.isPlaying,
-    state.playerState.currentDuration,
-  ],
+  (state) => [state.songlist.currentSong],
+  () => {
+    discordRpc.sendCurrentSong()
+  },
+  {
+    equalityFn: shallow,
+  },
+)
+
+usePlaybackSessionStore.subscribe(
+  (state) => [state.isPlaying, state.currentDuration],
   () => {
     discordRpc.sendCurrentSong()
   },
@@ -1003,11 +1045,10 @@ usePlayerStore.subscribe((state, prevState) => {
   const progress = state.playerProgress.progress
   const prevProgress = prevState.playerProgress.progress
   const duration = currentSong.duration
-  const isPlaying = state.playerState.isPlaying
+  const { isPlaying, hasSyncedTheCurrentTrack, hasScrobbledTheCurrentTrack } =
+    usePlaybackSessionStore.getState()
 
-  const hasSynced = state.playerState.hasSyncedTheCurrentTrack
-
-  if (progress >= 1 && prevProgress < 1 && !hasSynced) {
+  if (progress >= 1 && prevProgress < 1 && !hasSyncedTheCurrentTrack) {
     usePlayerStore.getState().actions.setHasSyncedTheCurrentTrack(true)
 
     scrobble.send(currentSong.id, false)
@@ -1025,10 +1066,11 @@ usePlayerStore.subscribe((state, prevState) => {
   const fourMinutesInSeconds = 60 * 4
   const targetTime = Math.min(halfDuration, fourMinutesInSeconds)
 
-  const hasScrobbled =
-    usePlayerStore.getState().playerState.hasScrobbledTheCurrentTrack
-
-  if (duration > 0 && accumulatedTime >= targetTime && !hasScrobbled) {
+  if (
+    duration > 0 &&
+    accumulatedTime >= targetTime &&
+    !hasScrobbledTheCurrentTrack
+  ) {
     usePlayerStore.getState().actions.setHasScrobbledTheCurrentTrack(true)
 
     scrobble.send(currentSong.id, true)
@@ -1053,7 +1095,7 @@ desktopStateListener()
 function updateDesktopState() {
   if (!isDesktop()) return
 
-  const { isPlaying, hasPrev, hasNext } = usePlayerStore.getState().playerState
+  const { isPlaying, hasPrev, hasNext } = usePlaybackSessionStore.getState()
   const { currentList, podcastList, radioList } =
     usePlayerStore.getState().songlist
 
@@ -1071,12 +1113,21 @@ function updateDesktopState() {
 
 updateDesktopState()
 
+usePlaybackSessionStore.subscribe(
+  (state) => [state.isPlaying, state.hasPrev, state.hasNext],
+  () => {
+    updateDesktopState()
+  },
+  {
+    equalityFn: shallow,
+  },
+)
+
 usePlayerStore.subscribe(
-  (state) => [
-    state.playerState.isPlaying,
-    state.playerState.hasPrev,
-    state.playerState.hasNext,
-    state.songlist.currentList,
+  ({ songlist }) => [
+    songlist.currentList,
+    songlist.radioList,
+    songlist.podcastList,
   ],
   () => {
     updateDesktopState()
@@ -1114,10 +1165,10 @@ export const usePlayerCurrentSongIndex = () =>
   usePlayerStore((state) => state.songlist.currentSongIndex)
 
 export const usePlayerProgress = () =>
-  usePlayerStore((state) => state.playerProgress.progress)
+  usePlaybackSessionStore((state) => state.progress)
 
 export const usePlayerVolume = () => ({
-  volume: usePlayerStore((state) => state.playerState.volume),
+  volume: usePlaybackSessionStore((state) => state.volume),
   setVolume: usePlayerStore((state) => state.actions.setVolume),
   handleVolumeWheel: usePlayerStore((state) => state.actions.handleVolumeWheel),
 })
@@ -1154,7 +1205,7 @@ export const useLyricsSettings = () =>
 export const usePlayerSettings = () => usePlayerStore((state) => state.settings)
 
 export const usePlayerMediaType = () => {
-  const mediaType = usePlayerStore((state) => state.playerState.mediaType)
+  const mediaType = usePlaybackSessionStore((state) => state.mediaType)
   const isSong = mediaType === 'song'
   const isRadio = mediaType === 'radio'
   const isPodcast = mediaType === 'podcast'
@@ -1167,30 +1218,33 @@ export const usePlayerMediaType = () => {
 }
 
 export const usePlayerIsPlaying = () =>
-  usePlayerStore((state) => state.playerState.isPlaying)
+  usePlaybackSessionStore((state) => state.isPlaying)
 
 export const usePlayerDuration = () =>
-  usePlayerStore((state) => state.playerState.currentDuration)
+  usePlaybackSessionStore((state) => state.currentDuration)
 
 export const usePlayerSongStarred = () =>
-  usePlayerStore((state) => state.playerState.isSongStarred)
+  usePlaybackSessionStore((state) => state.isSongStarred)
+
+export const usePlayerPlaybackRate = () =>
+  usePlaybackSessionStore((state) => state.currentPlaybackRate)
 
 export const usePlayerShuffle = () =>
-  usePlayerStore((state) => state.playerState.isShuffleActive)
+  usePlaybackSessionStore((state) => state.isShuffleActive)
 
 export const usePlayerLoop = () =>
-  usePlayerStore((state) => state.playerState.loopState)
+  usePlaybackSessionStore((state) => state.loopState)
 
 export const usePlayerPrevAndNext = () =>
-  usePlayerStore((state) => ({
-    hasPrev: state.playerState.hasPrev,
-    hasNext: state.playerState.hasNext,
+  usePlaybackSessionStore((state) => ({
+    hasPrev: state.hasPrev,
+    hasNext: state.hasNext,
   }))
 
 export const usePlayerRef = () =>
   usePlayerStore((state) => state.playerState.audioPlayerRef)
 
-export const getVolume = () => usePlayerStore.getState().playerState.volume
+export const getVolume = () => usePlaybackSessionStore.getState().volume
 
 export const useMainDrawerState = () =>
   usePlayerUiStore((state) => ({

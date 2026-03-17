@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/app/components/ui/dropdown-menu'
-import { usePlayerActions, usePlayerStore } from '@/store/player.store'
+import { usePlayerActions, usePlayerPlaybackRate } from '@/store/player.store'
 
 const rates = [
   { label: '0.25x', value: 0.25 },
@@ -23,9 +23,7 @@ const rates = [
 
 export function PodcastPlaybackRate() {
   const { t } = useTranslation()
-  const currentPlaybackRate = usePlayerStore(
-    (state) => state.playerState.currentPlaybackRate,
-  )
+  const currentPlaybackRate = usePlayerPlaybackRate()
   const { setPlaybackRate } = usePlayerActions()
 
   const currentRate = rates.find((rate) => rate.value === currentPlaybackRate)

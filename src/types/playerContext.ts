@@ -30,9 +30,6 @@ export interface IPlayerState {
   mediaType: 'song' | 'radio' | 'podcast'
   currentPlaybackRate: number
   audioPlayerRef: HTMLAudioElement | null
-  mainDrawerState: boolean
-  queueState: boolean
-  lyricsState: boolean
   hasSyncedTheCurrentTrack: boolean
   hasScrobbledTheCurrentTrack: boolean
   hasPrev: boolean
