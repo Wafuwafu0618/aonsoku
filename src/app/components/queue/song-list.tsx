@@ -7,6 +7,7 @@ import { DialogTitle } from '@/app/components/ui/dialog'
 import { Separator } from '@/app/components/ui/separator'
 import { queueColumns } from '@/app/tables/queue-columns'
 import {
+  usePlaybackQueueState,
   usePlayerActions,
   usePlayerCurrentList,
   usePlayerCurrentSongIndex,
@@ -18,17 +19,28 @@ export function QueueSongList() {
   const { t } = useTranslation()
   const currentList = usePlayerCurrentList()
   const currentSongIndex = usePlayerCurrentSongIndex()
+  const { queueItems, currentQueueIndex } = usePlaybackQueueState()
   const { clearPlayerState, setSongList } = usePlayerActions()
 
   const columns = useMemo(() => queueColumns(), [])
-  const trackListCount = useMemo(() => currentList.length, [currentList])
+
+  // WP5: QueueItemを使用（songの場合）
+  const displayList = queueItems.length > 0 ? queueItems : currentList
+  const displayIndex =
+    queueItems.length > 0 ? currentQueueIndex : currentSongIndex
+  const trackListCount = useMemo(() => displayList.length, [displayList])
 
   const trackListDuration = useMemo(() => {
     let minutes = 0
-    currentList.forEach((song) => (minutes += song.duration))
+    displayList.forEach((item) => {
+      // QueueItemとISongの両方に対応
+      const duration =
+        'durationSeconds' in item ? item.durationSeconds : item.duration
+      minutes += duration
+    })
 
     return convertSecondsToHumanRead(minutes)
-  }, [currentList])
+  }, [displayList])
 
   const columnsToShow: ColumnFilter[] = [
     'index',
@@ -70,13 +82,13 @@ export function QueueSongList() {
 
       <div className="w-full h-full overflow-auto">
         <DataTableList
-          data={currentList}
+          data={displayList}
           columns={columns}
           columnFilter={columnsToShow}
           showHeader={false}
           handlePlaySong={(row) => setSongList(currentList, row.index)}
           scrollToIndex={true}
-          currentSongIndex={currentSongIndex}
+          currentSongIndex={displayIndex}
           allowRowSelection={false}
           showContextMenu={false}
           pageType="queue"
