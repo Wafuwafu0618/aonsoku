@@ -86,16 +86,17 @@ export function AudioPlayer({
       songBackendRef.current = new InternalPlaybackBackend(audio)
     }
 
+    // WP5: 2曲目以降の再生を修正 - src変更時にisPlaying状態に応じてautoplay
     songBackendRef.current
       .load({
         src,
         loop,
-        autoplay: false,
+        autoplay: isPlaying,
       })
       .catch((error) => {
         logger.error('Audio source load failed', error)
       })
-  }, [audioRef, isSong, loop, src])
+  }, [audioRef, isSong, loop, src, isPlaying])
 
   useEffect(() => {
     if (!isSong) return
