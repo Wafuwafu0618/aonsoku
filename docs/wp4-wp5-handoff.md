@@ -222,4 +222,73 @@ ce576c1 feat(wp5): Queue表示のsource-aware化とSourceBadge追加 (kimi k2.5)
 
 ---
 
-*このドキュメントはWP4完了時点で作成されました。最新の状態はgit diff等で確認してください。*
+---
+
+## 10. WP5完了報告（2025年3月18日）
+
+### 10.1 全ステップ完了
+
+#### ✅ Step 5: Player現在曲とQueue現在曲のsource表示
+- `src/app/components/player/track-info.tsx`
+  - `usePlaybackQueueState`導入
+  - アーティスト名の横にSourceBadge（ドット版）を追加
+  - songのみ表示、radio/podcastは非表示
+
+- `src/app/components/queue/current-song-info.tsx`
+  - `usePlaybackQueueState`導入
+  - アーティストリンクの下にSourceBadge（ラベル版）を追加
+  - 中央揃えで表示
+
+### 10.2 WP5最終検証結果
+```
+✅ npm run lint - OK
+✅ npm run build -- --emptyOutDir false - OK
+✅ npm run test -- --spec src/app/components/player/player.cy.tsx - 9 passing
+```
+
+### 10.3 WP5全コミット履歴
+```
+a355fde feat(wp5): Player現在曲とQueue現在曲にsourceバッジ表示を追加 (kimi k2.5)
+ce576c1 feat(wp5): Queue表示のsource-aware化とSourceBadge追加 (kimi k2.5)
+ab28b1a docs: WP5進捗を引き継ぎドキュメントに追記 (kimi k2.5)
+```
+
+### 10.4 WP5作成/変更ファイル一覧
+
+#### 新規作成ファイル
+1. ✅ `src/store/queue-adapter.ts` - ISong→QueueItem変換アダプタ
+2. ✅ `src/app/components/source-badge.tsx` - SourceBadgeコンポーネント
+
+#### 変更ファイル
+3. ✅ `src/app/components/queue/song-list.tsx` - QueueItem対応
+4. ✅ `src/app/tables/queue-columns.tsx` - QueueItem/ISong両対応 + SourceBadge
+5. ✅ `src/app/components/player/track-info.tsx` - sourceバッジ追加
+6. ✅ `src/app/components/queue/current-song-info.tsx` - sourceバッジ追加
+
+### 10.5 実装詳細
+
+#### Source Badge表示位置
+- **Player（track-info）**: アーティスト名の横（小さめドット版）
+- **Queue（current-song-info）**: アーティストリンクの下（ラベル付き版）
+- **Queue一覧**: タイトルの横（ドット版）
+
+#### 対応ソース
+- `navidrome`: インディゴ色（#4F46E5）
+- `spotify`: グリーン（#1DB954）
+- `local`: バイオレット（#7C3AED）
+
+#### 非対応（現状維持）
+- radio: sourceバッジ非表示
+- podcast: sourceバッジ非表示
+
+### 10.6 次のフェーズ（WP6）への移行条件
+WP5が完了したため、以下の条件を満たしています：
+- ✅ アプリがtrackのsource metadataを表示できる
+- ✅ sourceの扱いがNavidrome専用前提になっていない
+- ✅ 将来Spotifyやlocal trackを追加してもqueue modelを作り直さずに済む
+
+**WP6準備完了**
+
+---
+
+*このドキュメントはWP5完了時点で最終更新されました。WP6以降の作業は別途ドキュメントを作成してください。*
