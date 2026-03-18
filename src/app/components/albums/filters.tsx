@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
+import { SourceFilterComponent } from '@/app/components/search/source-filter'
 import { ExpandableSearchInput } from '@/app/components/search/expandable-input'
 import { AlbumListType } from '@/types/responses/album'
 import { AlbumsFilters, AlbumsSearchParams } from '@/utils/albumsFilter'
@@ -25,6 +26,8 @@ export function AlbumsFilter() {
       {currentFilter === AlbumsFilters.ByGenre && <AlbumsFilterByGenre />}
 
       <AlbumsMainFilter />
+
+      <SourceFilterComponent />
 
       <ExpandableSearchInput placeholder={t('album.list.search.placeholder')} />
     </div>

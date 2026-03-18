@@ -12,19 +12,34 @@ export {
   extractMetadataFromFile,
   terminateWorker,
 } from './metadata/metadata-service'
+export {
+  convertLocalTrackToISong,
+  createLocalAlbumId,
+  createLocalAlbumIdFromTrack,
+  createLocalArtistId,
+  getContentType,
+  isLocalAlbumId,
+  isLocalArtistId,
+  toLocalSongId,
+} from './mappers/subsonic'
 
 // リポジトリ
 export {
   clearAllTracks,
   deleteTrack,
   getAllTracks,
+  getTracksCount,
+  getTracksPage,
   getLastScanTime,
   getLibraryStats,
   getTrack,
   getTrackByFilePath,
   saveTrack,
   saveTracksBatch,
+  removeTracksByDirectory,
   searchTracks,
+  searchTracksCount,
+  searchTracksPage,
   setLastScanTime,
 } from './repository'
 // スキャナー

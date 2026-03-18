@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { FolderPlus, RefreshCw, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Content,
@@ -18,6 +19,7 @@ import {
   getLastScanTime,
   getLibraryStats,
   LocalLibraryScanner,
+  removeTracksByDirectory,
 } from '@/local-library'
 import { pickLocalLibraryDirectory } from '@/platform'
 import {
@@ -25,6 +27,7 @@ import {
   useLocalLibraryDirectories,
   useLocalLibraryStatus,
 } from '@/store/local-library.store'
+import { queryKeys } from '@/utils/queryKeys'
 
 type LibraryStats = {
   totalTracks: number
@@ -32,8 +35,13 @@ type LibraryStats = {
   totalAlbums: number
 }
 
+function normalizeDirectoryPath(path: string): string {
+  return path.replace(/[\\/]+$/, '').toLowerCase()
+}
+
 export function LocalLibraryContent() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const scanner = useMemo<LocalLibraryScanner>(() => getDefaultScanner(), [])
   const directories = useLocalLibraryDirectories()
   const { isScanning, progress, lastScanAt } = useLocalLibraryStatus()
@@ -49,24 +57,29 @@ export function LocalLibraryContent() {
     totalArtists: 0,
     totalAlbums: 0,
   })
+  const [isUpdatingLibrary, setIsUpdatingLibrary] = useState(false)
+
+  const refreshLibrarySummary = useCallback(async () => {
+    const [scanTime, libraryStats] = await Promise.all([
+      getLastScanTime(),
+      getLibraryStats(),
+    ])
+
+    setLastScanAt(scanTime)
+    setStats({
+      totalTracks: libraryStats.totalTracks,
+      totalArtists: libraryStats.totalArtists,
+      totalAlbums: libraryStats.totalAlbums,
+    })
+  }, [setLastScanAt])
 
   useEffect(() => {
     let mounted = true
 
     async function initialize() {
-      const [scanTime, libraryStats] = await Promise.all([
-        getLastScanTime(),
-        getLibraryStats(),
-      ])
-
       if (!mounted) return
-
-      setLastScanAt(scanTime)
-      setStats({
-        totalTracks: libraryStats.totalTracks,
-        totalArtists: libraryStats.totalArtists,
-        totalAlbums: libraryStats.totalAlbums,
-      })
+      await refreshLibrarySummary()
+      if (!mounted) return
     }
 
     initialize().catch(() => {
@@ -76,7 +89,7 @@ export function LocalLibraryContent() {
     return () => {
       mounted = false
     }
-  }, [setLastScanAt])
+  }, [refreshLibrarySummary])
 
   async function handleAddDirectory() {
     const selected = await pickLocalLibraryDirectory()
@@ -86,7 +99,7 @@ export function LocalLibraryContent() {
   }
 
   async function handleStartScan() {
-    if (directories.length === 0) return
+    if (directories.length === 0 || isUpdatingLibrary) return
 
     setScanning(true)
     setProgress({
@@ -113,17 +126,7 @@ export function LocalLibraryContent() {
           })
         },
         async () => {
-          const [scanTime, libraryStats] = await Promise.all([
-            getLastScanTime(),
-            getLibraryStats(),
-          ])
-
-          setLastScanAt(scanTime)
-          setStats({
-            totalTracks: libraryStats.totalTracks,
-            totalArtists: libraryStats.totalArtists,
-            totalAlbums: libraryStats.totalAlbums,
-          })
+          await refreshLibrarySummary()
         },
       )
     } catch (error) {
@@ -140,8 +143,43 @@ export function LocalLibraryContent() {
     }
   }
 
-  function handleRemoveDirectory(path: string) {
-    removeDirectory(path)
+  async function handleRemoveDirectory(path: string) {
+    if (isScanning || isUpdatingLibrary) return
+
+    const normalizedTarget = normalizeDirectoryPath(path)
+    const remainingDirectories = directories.filter(
+      (directory) => normalizeDirectoryPath(directory) !== normalizedTarget,
+    )
+
+    setIsUpdatingLibrary(true)
+
+    try {
+      await removeTracksByDirectory(path, remainingDirectories)
+      removeDirectory(path)
+      await refreshLibrarySummary()
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: [queryKeys.song.all] }),
+        queryClient.invalidateQueries({ queryKey: [queryKeys.album.all] }),
+        queryClient.invalidateQueries({ queryKey: [queryKeys.album.single] }),
+        queryClient.invalidateQueries({ queryKey: [queryKeys.artist.all] }),
+        queryClient.invalidateQueries({ queryKey: [queryKeys.artist.single] }),
+        queryClient.invalidateQueries({
+          queryKey: [queryKeys.artist.topSongs],
+        }),
+      ])
+    } catch (error) {
+      setProgress({
+        ...progress,
+        status: 'error',
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : 'ローカルライブラリ更新中に不明なエラーが発生しました',
+      })
+    } finally {
+      setIsUpdatingLibrary(false)
+    }
   }
 
   const progressPercent =
@@ -169,7 +207,7 @@ export function LocalLibraryContent() {
               size="sm"
               variant="outline"
               onClick={handleAddDirectory}
-              disabled={isScanning}
+              disabled={isScanning || isUpdatingLibrary}
             >
               <FolderPlus className="w-4 h-4 mr-2" />
               {t('settings.content.localLibrary.actions.addDirectory')}
@@ -196,7 +234,7 @@ export function LocalLibraryContent() {
                   size="icon"
                   variant="ghost"
                   onClick={() => handleRemoveDirectory(directory)}
-                  disabled={isScanning}
+                  disabled={isScanning || isUpdatingLibrary}
                   aria-label={t(
                     'settings.content.localLibrary.actions.removeDirectory',
                   )}
@@ -217,7 +255,7 @@ export function LocalLibraryContent() {
               type="button"
               size="sm"
               onClick={handleStartScan}
-              disabled={isScanning || directories.length === 0}
+              disabled={isScanning || isUpdatingLibrary || directories.length === 0}
             >
               <RefreshCw
                 className={`w-4 h-4 mr-2 ${isScanning ? 'animate-spin' : ''}`}

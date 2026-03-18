@@ -10,8 +10,8 @@ import {
   CarouselItem,
 } from '@/app/components/ui/carousel'
 import { CarouselButton } from '@/app/components/ui/carousel-button'
+import { getAlbumById } from '@/queries/albums'
 import { ROUTES } from '@/routes/routesList'
-import { subsonic } from '@/service/subsonic'
 import { usePlayerActions } from '@/store/player.store'
 import { Albums } from '@/types/responses/album'
 
@@ -43,7 +43,7 @@ export default function PreviewList({
   }
 
   async function handlePlayAlbum(album: Albums) {
-    const response = await subsonic.albums.getOne(album.id)
+    const response = await getAlbumById(album.id)
 
     if (response) {
       setSongList(response.song, 0)

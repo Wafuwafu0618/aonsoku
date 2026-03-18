@@ -7,16 +7,36 @@ import { ArtistCredit } from '@/domain/entities/artist-credit'
 import { MediaPlaylistSummary } from '@/domain/entities/playlist'
 import { QueueItem } from '@/domain/entities/queue-item'
 import { MediaTrack } from '@/domain/entities/track'
+import { MediaSource } from '@/domain/media-source'
 
 const navidromeSource = 'navidrome' as const
 const internalBackend = 'internal' as const
 
-function getArtistCredits(song: ISong): ArtistCredit[] {
+function resolveSongSource(song: ISong): MediaSource {
+  if (song.id.startsWith('local:')) return 'local'
+  if (song.id.startsWith('spotify:')) return 'spotify'
+
+  return navidromeSource
+}
+
+function resolveSongSourceId(song: ISong, source: MediaSource): string {
+  if (source === 'local') {
+    return song.id.replace(/^local:/, '') || song.id
+  }
+
+  if (source === 'spotify') {
+    return song.id.replace(/^spotify:/, '') || song.id
+  }
+
+  return song.id
+}
+
+function getArtistCredits(song: ISong, source: MediaSource): ArtistCredit[] {
   if (song.artists && song.artists.length > 0) {
     return song.artists.map((artist) => ({
       id: artist.id,
       name: artist.name,
-      source: navidromeSource,
+      source,
     }))
   }
 
@@ -24,7 +44,7 @@ function getArtistCredits(song: ISong): ArtistCredit[] {
     {
       id: song.artistId,
       name: song.artist,
-      source: navidromeSource,
+      source,
     },
   ]
 }
@@ -46,18 +66,21 @@ function getAlbumGenreNames(album: Pick<Albums, 'genre' | 'genres'>): string[] {
 }
 
 export function mapNavidromeSongToTrack(song: ISong): MediaTrack {
+  const source = resolveSongSource(song)
+  const sourceId = resolveSongSourceId(song, source)
+
   return {
     kind: 'track',
-    id: createDomainId(navidromeSource, song.id),
-    source: navidromeSource,
-    sourceId: song.id,
+    id: createDomainId(source, sourceId),
+    source,
+    sourceId,
     playbackBackend: internalBackend,
     title: song.title,
     albumTitle: song.album,
     albumId: song.albumId,
     primaryArtist: song.artist,
     artistId: song.artistId,
-    artists: getArtistCredits(song),
+    artists: getArtistCredits(song, source),
     trackNumber: song.track,
     discNumber: song.discNumber,
     year: song.year,

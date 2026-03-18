@@ -23,7 +23,7 @@ export function CommandArtistResult({
   const { setSongList } = usePlayerActions()
 
   async function handlePlayArtistRadio(artist: ISimilarArtist) {
-    const artistSongs = await getArtistAllSongs(artist.name)
+    const artistSongs = await getArtistAllSongs(artist.id)
     if (artistSongs) setSongList(artistSongs, 0)
   }
 

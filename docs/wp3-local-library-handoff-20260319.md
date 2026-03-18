@@ -72,6 +72,45 @@
 - `local` の場合はIndexedDBから曲を取得
 - ローカル曲再生は `file:///` URLで再生
 
+### 2.7 AlbumsのSourceフィルタとローカルアルバム再生
+
+- 更新: `src/queries/albums.ts`
+- 更新: `src/app/pages/albums/list.model.tsx`
+- 更新: `src/app/components/albums/filters.tsx`
+- 更新: `src/app/pages/albums/album.tsx`
+- 更新: `src/app/hooks/use-album.tsx`
+- 更新: `src/app/components/albums/album-grid-card.tsx`
+- 更新: `src/app/components/home/preview-list.tsx`
+- 更新: `src/app/components/album/buttons.tsx`
+- 追加: `src/local-library/mappers/subsonic.ts`
+
+内容:
+- Albums画面で `All/Navidrome/Local` フィルタ
+- `local-album:*` を扱えるアルバム取得処理を追加
+- ローカルアルバム詳細ページで再生可能
+- ローカルアルバムでNavidrome専用操作（Like/Optionsなど）を抑制
+
+### 2.8 ArtistsのSourceフィルタとローカルアーティスト再生
+
+- 追加: `src/queries/artists.ts`
+- 更新: `src/app/hooks/use-artist.tsx`
+- 更新: `src/app/pages/artists/list.tsx`
+- 更新: `src/app/pages/artists/artist.tsx`
+- 更新: `src/app/components/artist/buttons.tsx`
+- 更新: `src/app/components/artist/artist-top-songs.tsx`
+- 更新: `src/app/components/artist/artist-grid-card.tsx`
+- 更新: `src/app/components/artist/options.tsx`
+- 更新: `src/app/components/artist/related-artists.tsx`
+- 更新: `src/app/components/command/artist-result.tsx`
+- 更新: `src/queries/songs.ts`
+- 更新: `src/queries/albums.ts`
+
+内容:
+- Artists画面で `All/Navidrome/Local` フィルタ
+- `local-artist:*` の一覧/詳細/Top Songs を取得可能に変更
+- ローカルアーティスト詳細でNavidrome依存表示（関連アーティスト/Like/Options）を抑制
+- アーティスト再生導線を `artist.id` ベースに統一し、ローカルIDでもキュー再生可能
+
 ## 3. 日本語運用の変更
 
 - 追加: `src/i18n/locales/ja.json`
@@ -109,14 +148,67 @@
 ## 5. 次に他ツールが進めるべき作業
 
 優先順:
-1. WP3.6（Songs/Albums/Artistsの仮想スクロール）
-2. ローカル曲のメタ情報マッピング精度向上（`ISong`互換項目の補完）
-3. フォルダ削除時の差分削除（現在は次回スキャンで全再構築）
-4. スキャンの増分更新最適化（mtime比較で再解析を最小化）
-5. エラーハンドリング改善（読み取り不能ファイルのUI表示改善）
+1. WP3.5アルバム/アーティスト対応の手動デバッグ完了（`/albums` `/artists` 一覧・詳細・再生・Source切替）
+2. Albums/Artistsの回帰テスト追加（少なくとも query層 + 画面操作の自動テスト）
+3. WP3.6（Songs/Albums/Artistsの仮想スクロール）
+4. ローカル曲/アルバム/アーティストのメタ情報マッピング精度向上（`ISong`互換項目の補完）
+5. スキャンの増分更新最適化とエラーハンドリング改善（差分削除含む）
+6. 上記完了後、フェーズ5「Aonsoku内蔵オーバーサンプラー/GPU」へ着手（先行でCPU実装、その後GPU）
 
 ## 6. 注意事項（引き継ぎ先向け）
 
 - この作業ブランチは既存変更が多く、ワークツリーがdirtyな前提。
 - `src/app/components/settings/local-library/scan-dashboard.tsx` は旧実装のため削除済み方針（新しい設定画面実装へ統合）。
 - 既存の `docs/wp3.5-debug-requirements.md` は初期案を含むため、本ドキュメントの状態を優先。
+
+---
+
+## 7. 追記（2026-03-19 / WP3.6前倒し対応）
+
+今回の更新で、巨大ライブラリ時のSongs表示負荷を下げるため、次を実施:
+
+- `src/local-library/repository.ts`
+  - `getTracksPage` / `getTracksCount` を追加
+  - `searchTracksPage` / `searchTracksCount` を追加
+  - `searchTracks` は内部的にページング版を利用する構成へ変更
+- `src/queries/songs.ts`
+  - `source=local` / `source=all` で全件読み込みを行わないページング処理に変更
+  - `source=all` は Navidrome 件数 + Local 件数を使って offset を正しく解決
+  - `LocalTrack -> ISong` 変換を拡張し、必須フィールド補完と型安全性を強化
+- `src/app/pages/songs/songlist.tsx`
+  - sourceフィルタ利用時の件数表示を `totalCount` 優先へ変更
+
+副次対応:
+
+- `src/domain/mappers/navidrome/index.ts`
+  - `song.id` から `local/spotify/navidrome` を判別し、QueueItemのsourceを正しく反映
+- `src/api/httpClient.ts`
+  - coverArtが `data:` / `file:` / `http(s):` の直接URLの場合は `getCoverArt` を経由しないよう改善
+
+## 8. 追記（2026-03-19 / Albums Source対応）
+
+今回の更新で、ローカルライブラリをAlbums画面にも統合:
+
+- `src/queries/albums.ts`
+  - `source=navidrome|local|all` で一覧/検索/ディスコグラフィ取得を切替
+  - `local-album:*` でローカルアルバム詳細を返す `getAlbumById` を追加
+  - ローカルアルバムの集約（曲->アルバム）とページングを実装
+- `src/app/pages/albums/list.model.tsx`
+  - Sourceパラメータをクエリキー/取得処理へ反映
+- `src/app/pages/albums/album.tsx`
+  - ローカルアルバム時の関連取得を抑制し、再生主体の表示へ切替
+- `src/app/components/album/buttons.tsx`
+  - ローカルアルバムではLike/Optionsを非表示化
+
+実行済み確認:
+
+- `npm run lint` : OK
+- `npm run build -- --emptyOutDir false` : OK
+- `npm run test -- --spec src/app/components/player/player.cy.tsx` : OK
+
+## 9. 次段階への移行条件（オーバーサンプリング着手ゲート）
+
+- `Songs / Albums / Artists` で `source=local|all` が安定している
+- ローカル曲/ローカルアルバム再生でキュー遷移が安定している
+- `docs/wp3.5-manual-debug-checklist.md`（Albums追加項目含む）が完了している
+- `lint` / `build` / 既存Cypress回帰が通っている

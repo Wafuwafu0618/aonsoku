@@ -11,6 +11,8 @@ import { AlbumListType } from '@/types/responses/album'
 import {
   AlbumsFilters,
   AlbumsSearchParams,
+  SourceFilter,
+  SourceFilters,
   YearFilter,
   YearSortOptions,
 } from '@/utils/albumsFilter'
@@ -38,6 +40,11 @@ export function useAlbumsListModel() {
   const genre = getSearchParam<string>(AlbumsSearchParams.Genre, '')
   const artistId = getSearchParam<string>(AlbumsSearchParams.ArtistId, '')
   const query = getSearchParam<string>(AlbumsSearchParams.Query, '')
+  const artistName = getSearchParam<string>(AlbumsSearchParams.ArtistName, '')
+  const sourceFilter = getSearchParam<SourceFilter>(
+    AlbumsSearchParams.Source,
+    SourceFilters.All,
+  )
 
   useEffect(() => {
     scrollDivRef.current = getMainScrollElement()
@@ -55,7 +62,12 @@ export function useAlbumsListModel() {
 
   const fetchAlbums = async ({ pageParam = 0 }) => {
     if (artistId !== '') {
-      return getArtistDiscography(artistId)
+      return getArtistDiscography(artistId, {
+        source: sourceFilter,
+        artistName,
+        offset: pageParam,
+        count: defaultOffset,
+      })
     }
 
     if (currentFilter === AlbumsFilters.Search && query !== '') {
@@ -63,6 +75,7 @@ export function useAlbumsListModel() {
         query,
         count: defaultOffset,
         offset: pageParam,
+        source: sourceFilter,
       })
     }
 
@@ -73,6 +86,7 @@ export function useAlbumsListModel() {
       fromYear,
       toYear,
       genre,
+      source: sourceFilter,
     })
   }
 
@@ -83,7 +97,15 @@ export function useAlbumsListModel() {
   }
 
   const { data, fetchNextPage, hasNextPage, isLoading } = useInfiniteQuery({
-    queryKey: [queryKeys.album.all, currentFilter, yearFilter, genre, query],
+    queryKey: [
+      queryKeys.album.all,
+      currentFilter,
+      yearFilter,
+      genre,
+      query,
+      artistId,
+      sourceFilter,
+    ],
     queryFn: fetchAlbums,
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextOffset,

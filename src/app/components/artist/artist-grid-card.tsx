@@ -17,12 +17,12 @@ function ArtistCard({ artist }: ArtistCardProps) {
   const { setSongList } = usePlayerActions()
 
   const handlePlayArtistRadio = useCallback(async () => {
-    const songList = await getArtistAllSongs(artist.name)
+    const songList = await getArtistAllSongs(artist.id)
 
     if (songList) {
       setSongList(songList, 0)
     }
-  }, [artist.name, getArtistAllSongs, setSongList])
+  }, [artist.id, getArtistAllSongs, setSongList])
 
   return (
     <PreviewCard.Root className="flex flex-col w-full h-full">

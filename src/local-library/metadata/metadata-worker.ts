@@ -35,6 +35,285 @@ interface ExtractErrorMessage {
 type MetadataValue = string | number[]
 type ITunesMetadata = Record<string, MetadataValue>
 
+interface ParsedAudioProperties {
+  duration?: number
+  bitrate?: number
+  sampleRate?: number
+  channels?: number
+}
+
+function toPositiveNumber(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined
+  }
+
+  return value
+}
+
+function safeDurationSeconds(value: number): number | undefined {
+  const duration = toPositiveNumber(value)
+  if (!duration) return undefined
+
+  return Math.max(1, Math.round(duration))
+}
+
+function readAscii(data: ArrayBuffer, start: number, end: number): string {
+  const decoder = new TextDecoder('ascii')
+  return decoder.decode(data.slice(start, end))
+}
+
+function parseMp3AudioProperties(fileData: ArrayBuffer): ParsedAudioProperties {
+  const bytes = new Uint8Array(fileData)
+  if (bytes.length < 4) return {}
+
+  let audioOffset = 0
+
+  if (
+    bytes.length >= 10 &&
+    bytes[0] === 0x49 &&
+    bytes[1] === 0x44 &&
+    bytes[2] === 0x33
+  ) {
+    const id3Size =
+      ((bytes[6] & 0x7f) << 21) |
+      ((bytes[7] & 0x7f) << 14) |
+      ((bytes[8] & 0x7f) << 7) |
+      (bytes[9] & 0x7f)
+    audioOffset = 10 + id3Size
+  }
+
+  let frameOffset = audioOffset
+  const scanLimit = Math.min(bytes.length - 4, audioOffset + 128 * 1024)
+
+  while (frameOffset < scanLimit) {
+    const b0 = bytes[frameOffset]
+    const b1 = bytes[frameOffset + 1]
+    if (b0 === 0xff && (b1 & 0xe0) === 0xe0) break
+    frameOffset += 1
+  }
+
+  if (frameOffset >= scanLimit) return {}
+
+  const header =
+    (bytes[frameOffset] << 24) |
+    (bytes[frameOffset + 1] << 16) |
+    (bytes[frameOffset + 2] << 8) |
+    bytes[frameOffset + 3]
+
+  const versionBits = (header >>> 19) & 0x3
+  const layerBits = (header >>> 17) & 0x3
+  const bitrateIndex = (header >>> 12) & 0xf
+  const sampleRateIndex = (header >>> 10) & 0x3
+  const channelMode = (header >>> 6) & 0x3
+
+  if (
+    versionBits === 0x1 ||
+    layerBits === 0x0 ||
+    bitrateIndex === 0x0 ||
+    bitrateIndex === 0xf ||
+    sampleRateIndex === 0x3
+  ) {
+    return {}
+  }
+
+  const isMpeg1 = versionBits === 0x3
+  const isMpeg2 = versionBits === 0x2
+  const version: 'mpeg1' | 'mpeg2' | 'mpeg25' = isMpeg1
+    ? 'mpeg1'
+    : isMpeg2
+      ? 'mpeg2'
+      : 'mpeg25'
+  const layer: 'layer1' | 'layer2' | 'layer3' =
+    layerBits === 0x3 ? 'layer1' : layerBits === 0x2 ? 'layer2' : 'layer3'
+
+  const sampleRateTable: Record<typeof version, number[]> = {
+    mpeg1: [44100, 48000, 32000],
+    mpeg2: [22050, 24000, 16000],
+    mpeg25: [11025, 12000, 8000],
+  }
+
+  const bitrateTable: Record<typeof version, Record<typeof layer, number[]>> = {
+    mpeg1: {
+      layer1: [
+        0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 0,
+      ],
+      layer2: [
+        0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 0,
+      ],
+      layer3: [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+      ],
+    },
+    mpeg2: {
+      layer1: [
+        0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0,
+      ],
+      layer2: [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+      ],
+      layer3: [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+      ],
+    },
+    mpeg25: {
+      layer1: [
+        0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0,
+      ],
+      layer2: [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+      ],
+      layer3: [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+      ],
+    },
+  }
+
+  const sampleRate = sampleRateTable[version][sampleRateIndex]
+  const bitrate = bitrateTable[version][layer][bitrateIndex]
+
+  if (!sampleRate || !bitrate) return {}
+
+  let audioBytes = Math.max(0, bytes.length - audioOffset)
+
+  if (bytes.length >= 128) {
+    const tailTag = readAscii(fileData, bytes.length - 128, bytes.length - 125)
+    if (tailTag === 'TAG') {
+      audioBytes = Math.max(0, audioBytes - 128)
+    }
+  }
+
+  const duration = safeDurationSeconds((audioBytes * 8) / (bitrate * 1000))
+
+  return {
+    duration,
+    bitrate: toPositiveNumber(bitrate),
+    sampleRate: toPositiveNumber(sampleRate),
+    channels: channelMode === 0x3 ? 1 : 2,
+  }
+}
+
+function parseFlacAudioProperties(fileData: ArrayBuffer): ParsedAudioProperties {
+  if (fileData.byteLength < 42) return {}
+  if (readAscii(fileData, 0, 4) !== 'fLaC') return {}
+
+  let offset = 4
+
+  while (offset + 4 <= fileData.byteLength) {
+    const header = new DataView(fileData, offset, 4)
+    const blockType = header.getUint8(0) & 0x7f
+    const isLast = (header.getUint8(0) & 0x80) !== 0
+    const blockSize =
+      (header.getUint8(1) << 16) |
+      (header.getUint8(2) << 8) |
+      header.getUint8(3)
+
+    offset += 4
+    if (offset + blockSize > fileData.byteLength) break
+
+    if (blockType === 0 && blockSize >= 18) {
+      const view = new DataView(fileData, offset, blockSize)
+      const sampleRate =
+        (view.getUint8(10) << 12) |
+        (view.getUint8(11) << 4) |
+        (view.getUint8(12) >> 4)
+      const channels = ((view.getUint8(12) >> 1) & 0x07) + 1
+      const totalSamplesHigh = view.getUint8(13) & 0x0f
+      const totalSamplesLow = view.getUint32(14, false)
+      const totalSamples = totalSamplesHigh * 2 ** 32 + totalSamplesLow
+
+      const duration =
+        sampleRate > 0 ? safeDurationSeconds(totalSamples / sampleRate) : undefined
+      const bitrate =
+        duration && duration > 0
+          ? toPositiveNumber(
+              Math.round((fileData.byteLength * 8) / (duration * 1000)),
+            )
+          : undefined
+
+      return {
+        duration,
+        bitrate,
+        sampleRate: toPositiveNumber(sampleRate),
+        channels: toPositiveNumber(channels),
+      }
+    }
+
+    if (isLast) break
+    offset += blockSize
+  }
+
+  return {}
+}
+
+function findMp4Box(
+  data: ArrayBuffer,
+  targetType: string,
+  startOffset = 0,
+  endOffset = data.byteLength,
+): { offset: number; size: number } | null {
+  let offset = startOffset
+
+  while (offset + 8 <= endOffset) {
+    const size = new DataView(data, offset, 4).getUint32(0, false)
+    const type = readAscii(data, offset + 4, offset + 8)
+    if (size < 8) break
+
+    if (type === targetType) {
+      return { offset, size }
+    }
+
+    offset += size
+  }
+
+  return null
+}
+
+function parseMp4AudioProperties(fileData: ArrayBuffer): ParsedAudioProperties {
+  const moov = findMp4Box(fileData, 'moov')
+  if (!moov) return {}
+
+  const moovStart = moov.offset + 8
+  const moovEnd = moov.offset + moov.size
+  const mvhd = findMp4Box(fileData, 'mvhd', moovStart, moovEnd)
+  if (!mvhd) return {}
+
+  const bodyOffset = mvhd.offset + 8
+  if (bodyOffset + 4 > fileData.byteLength) return {}
+
+  const view = new DataView(fileData)
+  const version = view.getUint8(bodyOffset)
+
+  let timescale = 0
+  let durationUnits = 0
+
+  if (version === 1) {
+    if (bodyOffset + 32 > fileData.byteLength) return {}
+    timescale = view.getUint32(bodyOffset + 20, false)
+    const upper = view.getUint32(bodyOffset + 24, false)
+    const lower = view.getUint32(bodyOffset + 28, false)
+    durationUnits = upper * 2 ** 32 + lower
+  } else {
+    if (bodyOffset + 20 > fileData.byteLength) return {}
+    timescale = view.getUint32(bodyOffset + 12, false)
+    durationUnits = view.getUint32(bodyOffset + 16, false)
+  }
+
+  if (timescale <= 0 || durationUnits <= 0) return {}
+
+  const duration = safeDurationSeconds(durationUnits / timescale)
+  const bitrate =
+    duration && duration > 0
+      ? toPositiveNumber(
+          Math.round((fileData.byteLength * 8) / (duration * 1000)),
+        )
+      : undefined
+
+  return {
+    duration,
+    bitrate,
+  }
+}
+
 function getMetadataString(
   metadata: ITunesMetadata,
   key: string,
@@ -91,6 +370,7 @@ async function extractMP3Metadata(
   fileData: ArrayBuffer,
 ): Promise<MetadataParseResult> {
   try {
+    const audioProps = parseMp3AudioProperties(fileData)
     const decoder = new TextDecoder('utf-8')
 
     // ID3v2ヘッダー確認
@@ -99,7 +379,13 @@ async function extractMP3Metadata(
       // ID3タグなし - 基本情報のみ返す
       return {
         success: true,
-        track: createBasicTrack(filePath, fileData.byteLength, 'mp3'),
+        track: {
+          ...createBasicTrack(filePath, fileData.byteLength, 'mp3'),
+          duration: audioProps.duration,
+          bitrate: audioProps.bitrate,
+          sampleRate: audioProps.sampleRate,
+          channels: audioProps.channels,
+        },
       }
     }
 
@@ -121,6 +407,7 @@ async function extractMP3Metadata(
       success: true,
       track: {
         ...createBasicTrack(filePath, fileData.byteLength, 'mp3'),
+        duration: audioProps.duration,
         title: metadata.title || getFilenameWithoutExt(filePath),
         artist: metadata.artist || 'Unknown Artist',
         album: metadata.album || 'Unknown Album',
@@ -129,6 +416,9 @@ async function extractMP3Metadata(
         discNumber: metadata.discNumber,
         year: metadata.year,
         genre: metadata.genre,
+        bitrate: audioProps.bitrate,
+        sampleRate: audioProps.sampleRate,
+        channels: audioProps.channels,
       },
     }
   } catch (error) {
@@ -276,6 +566,7 @@ async function extractFLACMetadata(
   fileData: ArrayBuffer,
 ): Promise<MetadataParseResult> {
   try {
+    const audioProps = parseFlacAudioProperties(fileData)
     const decoder = new TextDecoder('utf-8')
 
     // fLaCマーカー確認
@@ -317,6 +608,7 @@ async function extractFLACMetadata(
       success: true,
       track: {
         ...createBasicTrack(filePath, fileData.byteLength, 'flac'),
+        duration: audioProps.duration,
         title: metadata.TITLE || getFilenameWithoutExt(filePath),
         artist: metadata.ARTIST || 'Unknown Artist',
         album: metadata.ALBUM || 'Unknown Album',
@@ -331,6 +623,9 @@ async function extractFLACMetadata(
           ? parseInt(metadata.DATE.substring(0, 4), 10)
           : undefined,
         genre: metadata.GENRE,
+        bitrate: audioProps.bitrate,
+        sampleRate: audioProps.sampleRate,
+        channels: audioProps.channels,
       },
     }
   } catch (error) {
@@ -390,6 +685,7 @@ async function extractMP4Metadata(
   fileData: ArrayBuffer,
 ): Promise<MetadataParseResult> {
   try {
+    const audioProps = parseMp4AudioProperties(fileData)
     // ftypボックス確認
     const decoder = new TextDecoder('ascii')
     const ftypType = decoder.decode(fileData.slice(4, 8))
@@ -437,6 +733,7 @@ async function extractMP4Metadata(
       success: true,
       track: {
         ...createBasicTrack(filePath, fileData.byteLength, format),
+        duration: audioProps.duration,
         title:
           getMetadataString(metadata, '©nam') ||
           getFilenameWithoutExt(filePath),
@@ -449,6 +746,7 @@ async function extractMP4Metadata(
           ? parseInt(getMetadataString(metadata, '©day') ?? '', 10)
           : undefined,
         genre: getMetadataString(metadata, '©gen'),
+        bitrate: audioProps.bitrate,
       },
     }
   } catch (error) {

@@ -17,6 +17,7 @@ export function AlbumButtons({ album, showInfoButton }: AlbumButtonsProps) {
   const { t } = useTranslation()
   const { setSongList } = usePlayerActions()
   const { showInfoPanel, toggleShowInfoPanel } = useAppPages()
+  const isLocalAlbum = album.id.startsWith('local-album:')
 
   const isAlbumStarred = album.starred !== undefined
 
@@ -32,6 +33,7 @@ export function AlbumButtons({ album, showInfoButton }: AlbumButtonsProps) {
   })
 
   function handleLikeButton() {
+    if (isLocalAlbum) return
     if (!album) return
 
     starMutation.mutate({
@@ -73,12 +75,14 @@ export function AlbumButtons({ album, showInfoButton }: AlbumButtonsProps) {
         </Actions.Button>
       )}
 
-      <Actions.Button
-        tooltip={buttonsTooltips.like()}
-        onClick={handleLikeButton}
-      >
-        <Actions.LikeIcon isStarred={isAlbumStarred} />
-      </Actions.Button>
+      {!isLocalAlbum && (
+        <Actions.Button
+          tooltip={buttonsTooltips.like()}
+          onClick={handleLikeButton}
+        >
+          <Actions.LikeIcon isStarred={isAlbumStarred} />
+        </Actions.Button>
+      )}
 
       {showInfoButton && (
         <Actions.Button
@@ -89,10 +93,12 @@ export function AlbumButtons({ album, showInfoButton }: AlbumButtonsProps) {
         </Actions.Button>
       )}
 
-      <Actions.Dropdown
-        tooltip={buttonsTooltips.options}
-        options={<AlbumOptions album={album} />}
-      />
+      {!isLocalAlbum && (
+        <Actions.Dropdown
+          tooltip={buttonsTooltips.options}
+          options={<AlbumOptions album={album} />}
+        />
+      )}
     </Actions.Container>
   )
 }

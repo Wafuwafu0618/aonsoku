@@ -27,6 +27,10 @@ function isMusicFile(path: string): boolean {
   return MUSIC_EXTENSIONS.has(extname(path).toLowerCase())
 }
 
+function getFileEntryKey(path: string): string {
+  return platform.isWindows ? path.toLowerCase() : path
+}
+
 async function walkMusicFiles(
   dirPath: string,
 ): Promise<LocalLibraryFileEntry[]> {
@@ -232,7 +236,7 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   ipcMain.handle(
     IpcChannels.ListLocalLibraryFiles,
     async (_, directories: string[]) => {
-      const allFiles: LocalLibraryFileEntry[] = []
+      const allFilesByPath = new Map<string, LocalLibraryFileEntry>()
 
       for (const directory of directories) {
         try {
@@ -240,13 +244,18 @@ export function setupIpcEvents(window: BrowserWindow | null) {
           if (!fileStat.isDirectory()) continue
 
           const files = await walkMusicFiles(directory)
-          allFiles.push(...files)
+          for (const file of files) {
+            const fileKey = getFileEntryKey(file.path)
+            if (!allFilesByPath.has(fileKey)) {
+              allFilesByPath.set(fileKey, file)
+            }
+          }
         } catch {
           // invalid directory is skipped
         }
       }
 
-      return allFiles
+      return Array.from(allFilesByPath.values())
     },
   )
 

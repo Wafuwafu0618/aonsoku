@@ -1,10 +1,18 @@
-import { LocalTrack } from '@/local-library'
-import { getAllTracks, searchTracks } from '@/local-library/repository'
+import {
+  convertLocalTrackToISong,
+  createLocalArtistId,
+  getAllTracks,
+  getTracksCount,
+  getTracksPage,
+  searchTracksCount,
+  searchTracksPage,
+} from '@/local-library'
 import { SearchQueryOptions } from '@/service/search'
 import { subsonic } from '@/service/subsonic'
+import { useAppStore } from '@/store/app.store'
 import { ISong } from '@/types/responses/song'
 
-const emptyResponse = { songs: [], nextOffset: null }
+const NAVIDROME_COUNT_PAGE_SIZE = 100
 
 type SongSearchParams = Required<
   Pick<SearchQueryOptions, 'query' | 'songCount' | 'songOffset'>
@@ -12,103 +20,274 @@ type SongSearchParams = Required<
   source?: 'all' | 'navidrome' | 'local'
 }
 
-/**
- * LocalTrackをISong形式に変換（簡易版）
- * TODO: 完全なマッピング実装が必要
- */
-function convertLocalTrackToISong(track: LocalTrack): ISong {
-  return {
-    id: track.id,
-    parent: '',
-    isDir: false,
-    title: track.title,
-    album: track.album,
-    artist: track.artist,
-    track: track.trackNumber ?? 0,
-    year: track.year ?? 0,
-    genre: track.genre,
-    coverArt: track.coverArt || '',
-    size: track.fileSize,
-    contentType: getContentType(track.format),
-    suffix: track.format,
-    duration: track.duration,
-    bitRate: track.bitrate ?? 0,
-    path: track.filePath,
-    discNumber: track.discNumber ?? 0,
-    type: 'music',
-  } as ISong
+export interface SongSearchResult {
+  songs: ISong[]
+  nextOffset: number | null
+  totalCount?: number
 }
 
-function getContentType(format: string): string {
-  const mimeTypes: Record<string, string> = {
-    mp3: 'audio/mpeg',
-    flac: 'audio/flac',
-    aac: 'audio/aac',
-    alac: 'audio/mp4',
+const navidromeSongCountCache = new Map<string, number>()
+const navidromeSongCountInFlight = new Map<string, Promise<number>>()
+
+function sortSongsForArtist(songA: ISong, songB: ISong): number {
+  const albumCompare = songA.album.localeCompare(songB.album)
+  if (albumCompare !== 0) return albumCompare
+
+  if (songA.discNumber !== songB.discNumber) {
+    return songA.discNumber - songB.discNumber
   }
-  return mimeTypes[format] || 'audio/mpeg'
+
+  if (songA.track !== songB.track) {
+    return songA.track - songB.track
+  }
+
+  return songA.title.localeCompare(songB.title)
 }
 
-export async function songsSearch(params: SongSearchParams) {
-  const { source = 'all', query, songCount, songOffset } = params
-  const navidromeSongs: ISong[] = []
-  const localSongs: ISong[] = []
+async function fetchNavidromeSongsPage(
+  query: string,
+  songOffset: number,
+  songCount: number,
+): Promise<ISong[]> {
+  if (songCount <= 0) return []
 
-  // Navidromeから曲を取得（allまたはnavidromeの場合）
-  if (source === 'all' || source === 'navidrome') {
-    const response = await subsonic.search.get({
-      artistCount: 0,
-      albumCount: 0,
+  const response = await subsonic.search.get({
+    artistCount: 0,
+    albumCount: 0,
+    query,
+    songCount,
+    songOffset,
+  })
+
+  return response?.song ?? []
+}
+
+async function resolveNavidromeSongCount(query: string): Promise<number> {
+  const normalizedQuery = query.trim().toLowerCase()
+
+  if (navidromeSongCountCache.has(normalizedQuery)) {
+    return navidromeSongCountCache.get(normalizedQuery) ?? 0
+  }
+
+  if (normalizedQuery === '') {
+    const storedSongCount = useAppStore.getState().data.songCount
+    if (storedSongCount && storedSongCount > 0) {
+      navidromeSongCountCache.set(normalizedQuery, storedSongCount)
+      return storedSongCount
+    }
+  }
+
+  const inFlight = navidromeSongCountInFlight.get(normalizedQuery)
+  if (inFlight) return inFlight
+
+  const countPromise = (async () => {
+    let lowerBound = 0
+    let upperBound = NAVIDROME_COUNT_PAGE_SIZE
+
+    while (true) {
+      const songs = await fetchNavidromeSongsPage(
+        query,
+        upperBound,
+        NAVIDROME_COUNT_PAGE_SIZE,
+      )
+
+      if (songs.length < NAVIDROME_COUNT_PAGE_SIZE) break
+      lowerBound = upperBound
+      upperBound *= 2
+    }
+
+    while (lowerBound < upperBound) {
+      const midpoint = Math.floor((lowerBound + upperBound) / 2)
+      const songs = await fetchNavidromeSongsPage(
+        query,
+        midpoint,
+        NAVIDROME_COUNT_PAGE_SIZE,
+      )
+
+      if (songs.length < NAVIDROME_COUNT_PAGE_SIZE) {
+        upperBound = midpoint
+      } else {
+        lowerBound = midpoint + 1
+      }
+    }
+
+    const tailOffset = lowerBound
+    const tailSongs = await fetchNavidromeSongsPage(
       query,
-      songCount,
-      songOffset,
-    })
+      tailOffset,
+      NAVIDROME_COUNT_PAGE_SIZE,
+    )
+    const total = tailOffset + tailSongs.length
 
-    if (response?.song) {
-      navidromeSongs.push(...response.song)
+    navidromeSongCountCache.set(normalizedQuery, total)
+
+    if (normalizedQuery === '') {
+      useAppStore.setState((state) => {
+        state.data.songCount = total
+      })
     }
+
+    return total
+  })()
+
+  navidromeSongCountInFlight.set(normalizedQuery, countPromise)
+
+  try {
+    return await countPromise
+  } finally {
+    navidromeSongCountInFlight.delete(normalizedQuery)
   }
+}
 
-  // ローカルライブラリから曲を取得（allまたはlocalの場合）
-  if (source === 'all' || source === 'local') {
-    if (query) {
-      const tracks = await searchTracks(query)
-      localSongs.push(...tracks.map(convertLocalTrackToISong))
-    } else {
-      const tracks = await getAllTracks()
-      localSongs.push(...tracks.map(convertLocalTrackToISong))
-    }
-  }
-
-  // 結果をマージ
-  let mergedSongs: ISong[] = []
-
-  if (source === 'all') {
-    mergedSongs = [...navidromeSongs, ...localSongs]
-  } else if (source === 'navidrome') {
-    mergedSongs = navidromeSongs
-  } else {
-    mergedSongs = localSongs
-  }
-
-  // オフセットと件数でフィルタリング
-  const paginatedSongs = mergedSongs.slice(songOffset, songOffset + songCount)
-
-  let nextOffset: number | null = null
-  if (songOffset + songCount < mergedSongs.length) {
-    nextOffset = songOffset + songCount
-  }
+async function getLocalSongsPage(
+  query: string,
+  offset: number,
+  limit: number,
+): Promise<{ songs: ISong[]; totalCount: number }> {
+  const localResult = query
+    ? await searchTracksPage(query, offset, limit)
+    : await getTracksPage(offset, limit)
 
   return {
-    songs: paginatedSongs,
-    nextOffset,
+    songs: localResult.tracks.map(convertLocalTrackToISong),
+    totalCount: localResult.total,
+  }
+}
+
+async function getLocalSongsCount(query: string): Promise<number> {
+  if (query) {
+    return searchTracksCount(query)
+  }
+
+  return getTracksCount()
+}
+
+export async function songsSearch(
+  params: SongSearchParams,
+): Promise<SongSearchResult> {
+  const { source = 'all', query, songCount, songOffset } = params
+
+  if (source === 'navidrome') {
+    const songs = await fetchNavidromeSongsPage(query, songOffset, songCount)
+    const totalCount =
+      songOffset === 0 ? await resolveNavidromeSongCount(query) : undefined
+
+    return {
+      songs,
+      nextOffset:
+        totalCount !== undefined
+          ? songOffset + songs.length < totalCount
+            ? songOffset + songCount
+            : null
+          : songs.length >= songCount
+            ? songOffset + songCount
+            : null,
+      totalCount,
+    }
+  }
+
+  if (source === 'local') {
+    const localPage = await getLocalSongsPage(query, songOffset, songCount)
+
+    return {
+      songs: localPage.songs,
+      nextOffset:
+        songOffset + localPage.songs.length < localPage.totalCount
+          ? songOffset + songCount
+          : null,
+      totalCount: localPage.totalCount,
+    }
+  }
+
+  const [navidromeCount, localCount] = await Promise.all([
+    resolveNavidromeSongCount(query),
+    getLocalSongsCount(query),
+  ])
+  const totalCount = navidromeCount + localCount
+
+  if (songOffset >= totalCount) {
+    return {
+      songs: [],
+      nextOffset: null,
+      totalCount,
+    }
+  }
+
+  const navidromePageSize = Math.min(
+    songCount,
+    Math.max(0, navidromeCount - songOffset),
+  )
+  const navidromeSongs =
+    navidromePageSize > 0
+      ? await fetchNavidromeSongsPage(query, songOffset, navidromePageSize)
+      : []
+
+  const localPageOffset = Math.max(0, songOffset - navidromeCount)
+  const localPageSize = Math.max(0, songCount - navidromeSongs.length)
+  const localPage =
+    localPageSize > 0
+      ? await getLocalSongsPage(query, localPageOffset, localPageSize)
+      : { songs: [], totalCount: localCount }
+
+  const songs = [...navidromeSongs, ...localPage.songs]
+
+  return {
+    songs,
+    nextOffset:
+      songOffset + songs.length < totalCount ? songOffset + songCount : null,
+    totalCount,
   }
 }
 
 export async function getArtistAllSongs(artistId: string) {
+  if (artistId.startsWith('local-artist:')) {
+    const tracks = await getAllTracks()
+    const encodedArtistName = artistId.replace('local-artist:', '')
+    const decodedArtistName = (() => {
+      try {
+        return decodeURIComponent(encodedArtistName)
+      } catch {
+        return encodedArtistName
+      }
+    })()
+      .trim()
+      .toLowerCase()
+
+    const songs = tracks
+      .map(convertLocalTrackToISong)
+      .filter((song) => {
+        const normalizedArtistId = song.artistId || createLocalArtistId(song.artist)
+        if (normalizedArtistId === artistId) return true
+
+        return song.artist.trim().toLowerCase() === decodedArtistName
+      })
+      .sort(sortSongsForArtist)
+
+    return {
+      songs,
+      nextOffset: null,
+      totalCount: songs.length,
+    }
+  }
+
   const artist = await subsonic.artists.getOne(artistId)
 
-  if (!artist || !artist.album) return emptyResponse
+  if (!artist || !artist.album) {
+    const fallbackSearch = await subsonic.search.get({
+      query: artistId,
+      songCount: 9999999,
+      albumCount: 0,
+      artistCount: 0,
+    })
+
+    const fallbackSongs = fallbackSearch?.song ?? []
+
+    return {
+      songs: fallbackSongs,
+      nextOffset: null,
+      totalCount: fallbackSongs.length,
+    }
+  }
 
   const results = await Promise.all(
     artist.album.map(({ id }) => subsonic.albums.getOne(id)),
@@ -123,6 +302,7 @@ export async function getArtistAllSongs(artistId: string) {
   return {
     songs,
     nextOffset: null,
+    totalCount: songs.length,
   }
 }
 

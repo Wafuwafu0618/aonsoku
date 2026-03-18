@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Actions } from '@/app/components/actions'
 import { useSongList } from '@/app/hooks/use-song-list'
+import { isLocalArtistId } from '@/local-library'
 import { subsonic } from '@/service/subsonic'
 import { useAppPages } from '@/store/app.store'
 import { usePlayerActions } from '@/store/player.store'
@@ -24,6 +25,7 @@ export function ArtistButtons({
   const { setSongList } = usePlayerActions()
   const { showInfoPanel, toggleShowInfoPanel } = useAppPages()
   const { getArtistAllSongs } = useSongList()
+  const isLocalArtist = isLocalArtistId(artist.id)
 
   const isArtistStarred = artist.starred !== undefined
 
@@ -39,6 +41,7 @@ export function ArtistButtons({
   })
 
   function handleLikeButton() {
+    if (isLocalArtist) return
     if (!artist) return
     starMutation.mutate({
       id: artist.id,
@@ -47,7 +50,7 @@ export function ArtistButtons({
   }
 
   async function handlePlayArtistRadio(shuffle = false) {
-    const songList = await getArtistAllSongs(artist?.name || '')
+    const songList = await getArtistAllSongs(artist.id)
 
     if (songList) {
       setSongList(songList, 0, shuffle)
@@ -89,12 +92,14 @@ export function ArtistButtons({
         <Actions.ShuffleIcon />
       </Actions.Button>
 
-      <Actions.Button
-        tooltip={buttonsTooltips.like()}
-        onClick={handleLikeButton}
-      >
-        <Actions.LikeIcon isStarred={isArtistStarred} />
-      </Actions.Button>
+      {!isLocalArtist && (
+        <Actions.Button
+          tooltip={buttonsTooltips.like()}
+          onClick={handleLikeButton}
+        >
+          <Actions.LikeIcon isStarred={isArtistStarred} />
+        </Actions.Button>
+      )}
 
       {showInfoButton && (
         <Actions.Button
@@ -105,10 +110,12 @@ export function ArtistButtons({
         </Actions.Button>
       )}
 
-      <Actions.Dropdown
-        tooltip={buttonsTooltips.options}
-        options={<ArtistOptions artist={artist} />}
-      />
+      {!isLocalArtist && (
+        <Actions.Dropdown
+          tooltip={buttonsTooltips.options}
+          options={<ArtistOptions artist={artist} />}
+        />
+      )}
     </Actions.Container>
   )
 }

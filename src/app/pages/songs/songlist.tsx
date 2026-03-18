@@ -42,7 +42,8 @@ export default function SongList() {
 
   const searchFilterIsSet = filter === AlbumsFilters.Search && query !== ''
   const filterByArtist = artistId !== '' && artistName !== ''
-  const hasSomeFilter = searchFilterIsSet || filterByArtist
+  const sourceFilterIsSet = sourceFilter !== SourceFilters.All
+  const hasSomeFilter = searchFilterIsSet || filterByArtist || sourceFilterIsSet
 
   async function fetchSongs({ pageParam = 0 }) {
     if (filterByArtist) {
@@ -73,7 +74,10 @@ export default function SongList() {
   if (!data) return null
 
   const songlist = data.pages.flatMap((page) => page.songs) ?? []
-  const songCount = (hasSomeFilter ? songlist.length : songCountData) ?? 0
+  const totalCountFromQuery = data.pages[0]?.totalCount
+  const songCount = (
+    hasSomeFilter ? totalCountFromQuery ?? songlist.length : songCountData
+  ) ?? 0
 
   function handlePlaySong(index: number) {
     if (songlist) setSongList(songlist, index)

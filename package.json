@@ -23,7 +23,7 @@
     "electron:dev": "electron-vite dev --watch",
     "electron:build": "electron-vite build",
     "postinstall": "electron-builder install-app-deps",
-    "build:unpack": "electron-builder --dir",
+    "build:unpack": "electron-builder --dir --config.win.signAndEditExecutable=false",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",

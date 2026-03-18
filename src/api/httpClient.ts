@@ -14,6 +14,16 @@ export interface FetchOptions extends RequestInit {
 
 type AuthParams = { u: string; t: string; s: string } | { u: string; p: string }
 
+function isDirectImageSource(value: string): boolean {
+  return (
+    value.startsWith('data:') ||
+    value.startsWith('blob:') ||
+    value.startsWith('file:') ||
+    value.startsWith('http://') ||
+    value.startsWith('https://')
+  )
+}
+
 export function authQueryParams(
   username: string,
   password: string,
@@ -117,6 +127,10 @@ export function getSimpleCoverArtUrl(
     return `/default_${resolvedType}_art.png`
   }
 
+  if (isDirectImageSource(id)) {
+    return id
+  }
+
   return getUrl('getCoverArt', { id, size })
 }
 
@@ -127,7 +141,7 @@ export async function getCoverArtUrl(
 ): Promise<string> {
   const url = getSimpleCoverArtUrl(id, type, size)
 
-  if (!id) {
+  if (!id || (id && isDirectImageSource(id))) {
     return url
   }
 

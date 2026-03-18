@@ -15,6 +15,7 @@ import {
   useGetArtistAlbums,
   useGetGenreAlbums,
 } from '@/app/hooks/use-album'
+import { isLocalAlbumId } from '@/local-library'
 import ErrorPage from '@/app/pages/error-page'
 import { songsColumns } from '@/app/tables/songs-columns'
 import { ROUTES } from '@/routes/routesList'
@@ -28,6 +29,7 @@ export default function Album() {
   const { albumId } = useParams() as { albumId: string }
   const { setSongList } = usePlayerActions()
   const { t } = useTranslation()
+  const isLocalAlbum = isLocalAlbumId(albumId)
 
   const {
     data: album,
@@ -35,10 +37,10 @@ export default function Album() {
     isFetched,
   } = useGetAlbum(albumId)
   const { data: artist, isLoading: moreAlbumsIsLoading } = useGetArtistAlbums(
-    album?.artistId || '',
+    !isLocalAlbum ? album?.artistId || '' : '',
   )
   const { data: randomAlbums, isLoading: randomAlbumsIsLoading } =
-    useGetGenreAlbums(album?.genre || '')
+    useGetGenreAlbums(!isLocalAlbum ? album?.genre || '' : '')
 
   const moreAlbums = artist?.album
 
@@ -57,9 +59,9 @@ export default function Album() {
   const badges: BadgesData = [
     { content: album.year?.toString() ?? null, type: 'text' },
     {
-      content: album.genre ?? null,
-      type: 'link',
-      link: ROUTES.ALBUMS.GENRE(album.genre),
+      content: album.genre || null,
+      type: !isLocalAlbum && album.genre ? 'link' : 'text',
+      link: !isLocalAlbum && album.genre ? ROUTES.ALBUMS.GENRE(album.genre) : '',
     },
     {
       content: album.songCount
@@ -75,17 +77,23 @@ export default function Album() {
     },
   ]
 
-  const columnsToShow: ColumnFilter[] = [
-    'trackNumber',
-    'title',
-    // 'artist',
-    'duration',
-    'playCount',
-    'played',
-    'bitRate',
-    'contentType',
-    'select',
-  ]
+  const columnsToShow: ColumnFilter[] = isLocalAlbum
+    ? [
+        'trackNumber',
+        'title',
+        'duration',
+        'contentType',
+      ]
+    : [
+        'trackNumber',
+        'title',
+        'duration',
+        'playCount',
+        'played',
+        'bitRate',
+        'contentType',
+        'select',
+      ]
 
   function removeCurrentAlbumFromList(moreAlbums: Albums[], sort = false) {
     if (moreAlbums.length === 0 || !album) return null
@@ -108,7 +116,7 @@ export default function Album() {
     : null
 
   const randomGenreAlbums =
-    randomAlbums?.list && album.genre
+    randomAlbums?.list && album.genre && !isLocalAlbum
       ? removeCurrentAlbumFromList(randomAlbums.list)
       : null
 
@@ -147,7 +155,7 @@ export default function Album() {
 
         <div className="mt-4">
           {moreAlbumsIsLoading && <PreviewListFallback />}
-          {artistAlbums && !moreAlbumsIsLoading && album.artistId && (
+          {artistAlbums && !moreAlbumsIsLoading && album.artistId && !isLocalAlbum && (
             <PreviewList
               list={artistAlbums}
               showMore={true}
@@ -158,7 +166,7 @@ export default function Album() {
           )}
 
           {randomAlbumsIsLoading && <PreviewListFallback />}
-          {!randomAlbumsIsLoading && randomGenreAlbums && (
+          {!randomAlbumsIsLoading && randomGenreAlbums && !isLocalAlbum && (
             <PreviewList
               list={randomGenreAlbums}
               moreRoute={ROUTES.ALBUMS.GENRE(album.genre)}

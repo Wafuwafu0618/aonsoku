@@ -15,6 +15,7 @@ import {
   useGetArtistInfo,
   useGetTopSongs,
 } from '@/app/hooks/use-artist'
+import { isLocalArtistId } from '@/local-library'
 import ErrorPage from '@/app/pages/error-page'
 import { ROUTES } from '@/routes/routesList'
 import { sortRecentAlbums } from '@/utils/album'
@@ -22,6 +23,7 @@ import { sortRecentAlbums } from '@/utils/album'
 export default function Artist() {
   const { t } = useTranslation()
   const { artistId } = useParams() as { artistId: string }
+  const isLocalArtist = isLocalArtistId(artistId)
 
   const {
     data: artist,
@@ -31,7 +33,7 @@ export default function Artist() {
   const { data: artistInfo, isLoading: artistInfoIsLoading } =
     useGetArtistInfo(artistId)
   const { data: topSongs, isLoading: topSongsIsLoading } = useGetTopSongs(
-    artist?.name,
+    artist?.id,
   )
 
   if (artistIsLoading) return <AlbumFallback />
@@ -69,12 +71,12 @@ export default function Artist() {
     {
       content: albumCount,
       type: 'link',
-      link: ROUTES.ALBUMS.ARTIST(artist.id, artist.name),
+      link: `${ROUTES.ALBUMS.ARTIST(artist.id, artist.name)}${isLocalArtist ? '&source=local' : ''}`,
     },
     {
       content: songCount,
       type: 'link',
-      link: ROUTES.SONGS.ARTIST_TRACKS(artist.id, artist.name),
+      link: `${ROUTES.SONGS.ARTIST_TRACKS(artist.id, artist.name)}${isLocalArtist ? '&source=local' : ''}`,
     },
   ]
 
@@ -105,12 +107,12 @@ export default function Artist() {
             title={t('artist.recentAlbums')}
             list={recentAlbums}
             moreTitle={t('album.more.discography')}
-            moreRoute={ROUTES.ALBUMS.ARTIST(artist.id, artist.name)}
+            moreRoute={`${ROUTES.ALBUMS.ARTIST(artist.id, artist.name)}${isLocalArtist ? '&source=local' : ''}`}
           />
         )}
 
         {artistInfoIsLoading && <PreviewListFallback />}
-        {artistInfo?.similarArtist && !artistInfoIsLoading && (
+        {artistInfo?.similarArtist && !artistInfoIsLoading && !isLocalArtist && (
           <RelatedArtistsList
             title={t('artist.relatedArtists')}
             similarArtists={artistInfo.similarArtist}

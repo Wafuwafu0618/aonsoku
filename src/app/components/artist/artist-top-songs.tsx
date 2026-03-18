@@ -19,6 +19,7 @@ export default function ArtistTopSongs({ topSongs, artist }: TopSongsProps) {
   const columns = songsColumns()
   const topTenSongs = topSongs.length > 10 ? topSongs.slice(0, 10) : topSongs
   const { id, name } = artist
+  const sourceQuery = id.startsWith('local-artist:') ? '&source=local' : ''
 
   const columnsToShow: ColumnFilter[] = [
     'index',
@@ -40,7 +41,7 @@ export default function ArtistTopSongs({ topSongs, artist }: TopSongsProps) {
         </h3>
 
         <Link
-          to={ROUTES.SONGS.ARTIST_TRACKS(id, name)}
+          to={`${ROUTES.SONGS.ARTIST_TRACKS(id, name)}${sourceQuery}`}
           className="h-full"
           data-testid="view-all-tracks-link"
         >

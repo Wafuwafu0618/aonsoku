@@ -15,7 +15,7 @@ export function ArtistOptions({ artist }: ArtistOptionsProps) {
   const { playLast, playNext, startDownload } = useOptions()
 
   async function getSongsToQueue(callback: (songs: ISong[]) => void) {
-    const songs = await getArtistAllSongs(artist.name)
+    const songs = await getArtistAllSongs(artist.id)
     if (!songs) return
 
     callback(songs)
