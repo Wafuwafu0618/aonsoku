@@ -6,13 +6,19 @@ import { InfinitySongListFallback } from '@/app/components/fallbacks/song-fallba
 import { HeaderTitle } from '@/app/components/header-title'
 import { ClearFilterButton } from '@/app/components/search/clear-filter-button'
 import { ExpandableSearchInput } from '@/app/components/search/expandable-input'
+import { SourceFilterComponent } from '@/app/components/search/source-filter'
 import { DataTableList } from '@/app/components/ui/data-table-list'
 import { useTotalSongs } from '@/app/hooks/use-total-songs'
 import { songsColumns } from '@/app/tables/songs-columns'
 import { getArtistAllSongs, songsSearch } from '@/queries/songs'
 import { usePlayerActions } from '@/store/player.store'
 import { ColumnFilter } from '@/types/columnFilter'
-import { AlbumsFilters, AlbumsSearchParams } from '@/utils/albumsFilter'
+import {
+  AlbumsFilters,
+  AlbumsSearchParams,
+  SourceFilter,
+  SourceFilters,
+} from '@/utils/albumsFilter'
 import { queryKeys } from '@/utils/queryKeys'
 import { SearchParamsHandler } from '@/utils/searchParamsHandler'
 
@@ -29,6 +35,10 @@ export default function SongList() {
   const query = getSearchParam<string>(AlbumsSearchParams.Query, '')
   const artistId = getSearchParam<string>(AlbumsSearchParams.ArtistId, '')
   const artistName = getSearchParam<string>(AlbumsSearchParams.ArtistName, '')
+  const sourceFilter = getSearchParam<SourceFilter>(
+    AlbumsSearchParams.Source,
+    SourceFilters.All,
+  )
 
   const searchFilterIsSet = filter === AlbumsFilters.Search && query !== ''
   const filterByArtist = artistId !== '' && artistName !== ''
@@ -43,12 +53,13 @@ export default function SongList() {
       query: searchFilterIsSet ? query : '',
       songCount: DEFAULT_OFFSET,
       songOffset: pageParam,
+      source: sourceFilter,
     })
   }
 
   const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } =
     useInfiniteQuery({
-      queryKey: [queryKeys.song.all, filter, query, artistId],
+      queryKey: [queryKeys.song.all, filter, query, artistId, sourceFilter],
       initialPageParam: 0,
       queryFn: fetchSongs,
       getNextPageParam: (lastPage) => lastPage.nextOffset,
@@ -99,6 +110,7 @@ export default function SongList() {
 
         <div className="flex gap-2 flex-1 justify-end">
           {filterByArtist && <ClearFilterButton />}
+          <SourceFilterComponent />
           <ExpandableSearchInput
             placeholder={t('songs.list.search.placeholder')}
           />

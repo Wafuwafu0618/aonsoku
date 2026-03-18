@@ -4,7 +4,7 @@
  * Web Workerを使用したメタデータ抽出のラッパー
  */
 
-import type { LocalTrack, MetadataParseResult, ScanProgress } from '../types'
+import type { MetadataParseResult } from '../types'
 
 // Workerインスタンス（遅延初期化）
 let worker: Worker | null = null
@@ -40,7 +40,7 @@ export async function extractMetadata(
   fileData: ArrayBuffer,
   format: 'mp3' | 'flac' | 'aac' | 'alac' | 'other',
 ): Promise<MetadataParseResult> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const w = getWorker()
 
     const handleMessage = (event: MessageEvent) => {

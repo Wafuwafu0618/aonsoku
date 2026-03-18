@@ -135,6 +135,13 @@
       }
     }
   },
+  "source": {
+    "filter": {
+      "all": "All Sources",
+      "navidrome": "Navidrome",
+      "local": "Local Library"
+    }
+  },
   "album": {
     "headline": "Album",
     "buttons": {

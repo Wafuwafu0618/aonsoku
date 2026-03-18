@@ -4,6 +4,29 @@
  * ローカル音源管理の公開API
  */
 
+// メタデータサービス
+export {
+  detectFormat,
+  extractMetadata,
+  extractMetadataBatch,
+  extractMetadataFromFile,
+  terminateWorker,
+} from './metadata/metadata-service'
+
+// リポジトリ
+export {
+  clearAllTracks,
+  deleteTrack,
+  getAllTracks,
+  getLastScanTime,
+  getLibraryStats,
+  getTrack,
+  getTrackByFilePath,
+  saveTrack,
+  saveTracksBatch,
+  searchTracks,
+  setLastScanTime,
+} from './repository'
 // スキャナー
 export {
   getDefaultScanner,
@@ -20,8 +43,3 @@ export type {
   ScanProgressCallback,
   ScanResult,
 } from './types'
-
-// メタデータパーサー（後続タスクで実装）
-// export * from './metadata/id3-parser'
-// export * from './metadata/vorbis-parser'
-// export * from './metadata/mp4-parser'

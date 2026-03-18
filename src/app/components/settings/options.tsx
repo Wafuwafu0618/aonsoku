@@ -2,7 +2,6 @@ import {
   CircleUserRound,
   EarthLock,
   FileText,
-  Globe,
   Headphones,
   LaptopIcon,
   Paintbrush,
@@ -38,7 +37,6 @@ const desktopOption: OptionsData = { id: 'desktop', icon: LaptopIcon }
 
 const options: OptionsData[] = [
   { id: 'appearance', icon: Paintbrush },
-  { id: 'language', icon: Globe },
   { id: 'audio', icon: Headphones },
   { id: 'content', icon: FileText },
   ...(isDesktop() ? [accountsOption, desktopOption] : []),

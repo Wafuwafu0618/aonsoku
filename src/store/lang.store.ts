@@ -11,15 +11,17 @@ export const useLangStore = createWithEqualityFn<ILangContext>()(
     persist(
       devtools(
         immer((set) => ({
-          langCode: '',
-          langNativeName: '',
-          flag: '',
+          langCode: 'ja',
+          langNativeName: '日本語',
+          flag: 'JP',
           setLang: (lang: string) => {
             if (!lang) return
 
-            const langObject = languages.filter(
+            const langObject = languages.find(
               (language) => language.langCode === lang,
-            )[0]
+            )
+
+            if (!langObject) return
 
             set((state) => {
               state.langCode = lang

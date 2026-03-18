@@ -6,7 +6,7 @@
  * - 増分更新対応
  */
 
-import type { LocalTrack, ScanError } from '../types'
+import type { LocalTrack } from './types'
 
 const DB_NAME = 'AonsokuLocalLibrary'
 const DB_VERSION = 1
@@ -74,27 +74,6 @@ async function getDB(): Promise<IDBDatabase> {
         })
       }
     }
-  })
-}
-
-/**
- * トランザクションヘルパー
- */
-async function withTransaction<T>(
-  storeNames: string | string[],
-  mode: IDBTransactionMode,
-  callback: (transaction: IDBTransaction) => Promise<T>,
-): Promise<T> {
-  const db = await getDB()
-  const transaction = db.transaction(storeNames, mode)
-
-  return new Promise((resolve, reject) => {
-    transaction.onerror = () => reject(transaction.error)
-    transaction.oncomplete = () => {
-      // callbackの結果を待つ
-    }
-
-    callback(transaction).then(resolve).catch(reject)
   })
 }
 
@@ -332,7 +311,7 @@ export async function searchTracks(query: string): Promise<LocalTrack[]> {
     if (resultIds === null) {
       resultIds = ids
     } else {
-      resultIds = new Set([...resultIds].filter((id) => ids.has(id)))
+      resultIds = new Set([...resultIds].filter((id: string) => ids.has(id)))
     }
   }
 

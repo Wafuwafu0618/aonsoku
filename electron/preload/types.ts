@@ -35,6 +35,30 @@ export enum IpcChannels {
   UpdateError = 'update-error',
   DownloadProgress = 'download-progress',
   UpdateDownloaded = 'update-downloaded',
+  PickLocalLibraryDirectory = 'pick-local-library-directory',
+  ListLocalLibraryFiles = 'list-local-library-files',
+  ReadLocalLibraryFile = 'read-local-library-file',
+}
+
+export interface LocalLibraryDirectoryEntry {
+  path: string
+  name: string
+}
+
+export interface LocalLibraryFileEntry {
+  path: string
+  name: string
+  size: number
+  modifiedAt: number
+  createdAt: number
+}
+
+export interface LocalLibraryFileContent {
+  path: string
+  data: ArrayBuffer
+  size: number
+  modifiedAt: number
+  createdAt: number
 }
 
 export type OverlayColors = {
@@ -89,4 +113,9 @@ export interface IAonsokuAPI {
   onUpdateError: (callback: (error: string) => void) => void
   onDownloadProgress: (callback: (progress: ProgressInfo) => void) => void
   onUpdateDownloaded: (callback: (info: UpdateDownloadedEvent) => void) => void
+  pickLocalLibraryDirectory: () => Promise<LocalLibraryDirectoryEntry | null>
+  listLocalLibraryFiles: (
+    directories: string[],
+  ) => Promise<LocalLibraryFileEntry[]>
+  readLocalLibraryFile: (path: string) => Promise<LocalLibraryFileContent>
 }

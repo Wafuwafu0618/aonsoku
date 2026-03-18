@@ -82,6 +82,12 @@ const api: IAonsokuAPI = {
   onUpdateDownloaded: (callback) => {
     ipcRenderer.on(IpcChannels.UpdateDownloaded, (_, info) => callback(info))
   },
+  pickLocalLibraryDirectory: () =>
+    ipcRenderer.invoke(IpcChannels.PickLocalLibraryDirectory),
+  listLocalLibraryFiles: (directories) =>
+    ipcRenderer.invoke(IpcChannels.ListLocalLibraryFiles, directories),
+  readLocalLibraryFile: (path) =>
+    ipcRenderer.invoke(IpcChannels.ReadLocalLibraryFile, path),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

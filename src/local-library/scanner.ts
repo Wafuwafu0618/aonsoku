@@ -1,12 +1,16 @@
-/**
- * Local Library Scanner
- *
- * ファイルシステムスキャン機能
- * - チャンク処理によるUIブロック回避
- * - 進捗コールバック対応
- */
-
+import { createDomainId } from '@/domain/id'
 import {
+  listLocalLibraryFiles,
+  readLocalLibraryFile,
+} from '@/platform/adapters/local-library-adapter'
+import { detectFormat, extractMetadata } from './metadata/metadata-service'
+import {
+  buildSearchIndex,
+  clearAllTracks,
+  saveTracksBatch,
+  setLastScanTime,
+} from './repository'
+import type {
   LocalTrack,
   ScanCompleteCallback,
   ScanError,
@@ -16,58 +20,18 @@ import {
   ScanResult,
 } from './types'
 
-// 対応する音楽ファイル拡張子
-const MUSIC_EXTENSIONS = [
-  '.mp3',
-  '.flac',
-  '.aac',
-  '.m4a', // AAC/ALAC共用
-  '.alac',
-]
-
-// デフォルト設定
 const DEFAULT_CONFIG: ScannerConfig = {
   directories: [],
   recursive: true,
   skipHiddenFiles: true,
-  supportedFormats: MUSIC_EXTENSIONS,
-  chunkSize: 100,
+  supportedFormats: ['.mp3', '.flac', '.aac', '.m4a', '.alac'],
+  chunkSize: 25,
 }
 
-/**
- * ファイルパスから拡張子を取得
- */
-function getExtension(filePath: string): string {
-  const lastDot = filePath.lastIndexOf('.')
-  return lastDot === -1 ? '' : filePath.slice(lastDot).toLowerCase()
-}
-
-/**
- * 隠しファイルかどうかチェック
- */
-function isHiddenFile(filePath: string): boolean {
-  const fileName = filePath.split(/[/\\]/).pop() || ''
-  return fileName.startsWith('.')
-}
-
-/**
- * 音楽ファイルかどうかチェック
- */
-function isMusicFile(filePath: string, supportedFormats: string[]): boolean {
-  const ext = getExtension(filePath)
-  return supportedFormats.includes(ext)
-}
-
-/**
- * メインスレッドに制御を戻す
- */
 function yieldToMainThread(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-/**
- * 配列をチャンクに分割
- */
 function chunkArray<T>(array: T[], chunkSize: number): T[][] {
   const chunks: T[][] = []
   for (let i = 0; i < array.length; i += chunkSize) {
@@ -76,70 +40,39 @@ function chunkArray<T>(array: T[], chunkSize: number): T[][] {
   return chunks
 }
 
-/**
- * ディレクトリ内の音楽ファイルを再帰的に取得
- */
-async function scanDirectory(
-  dirPath: string,
-  config: ScannerConfig,
-  onProgress?: (currentFile: string) => void,
-): Promise<string[]> {
-  const musicFiles: string[] = []
-  const errors: string[] = []
-
-  try {
-    // File System Access APIを使用（Electron環境）
-    const dirHandle = await (window as any).showDirectoryPicker()
-
-    async function traverseDirectory(
-      handle: FileSystemDirectoryHandle,
-      path: string,
-    ) {
-      for await (const entry of handle.values()) {
-        const entryPath = path ? `${path}/${entry.name}` : entry.name
-
-        if (config.skipHiddenFiles && isHiddenFile(entry.name)) {
-          continue
-        }
-
-        if (entry.kind === 'directory' && config.recursive) {
-          await traverseDirectory(entry as FileSystemDirectoryHandle, entryPath)
-        } else if (entry.kind === 'file') {
-          if (isMusicFile(entry.name, config.supportedFormats)) {
-            musicFiles.push(entryPath)
-            onProgress?.(entryPath)
-          }
-        }
-      }
-    }
-
-    await traverseDirectory(dirHandle, '')
-  } catch (error) {
-    // File System Access API非対応の場合はフォールバック
-    console.warn('File System Access API not available, using fallback')
-    return scanDirectoryFallback(dirPath, config, onProgress)
+function toScanError(filePath: string, error: unknown): ScanError {
+  return {
+    filePath,
+    error: error instanceof Error ? error.message : 'Unknown error',
+    timestamp: Date.now(),
   }
-
-  return musicFiles
 }
 
-/**
- * フォールバックスキャン（File System Access API非対応時）
- */
-async function scanDirectoryFallback(
-  dirPath: string,
-  config: ScannerConfig,
-  onProgress?: (currentFile: string) => void,
-): Promise<string[]> {
-  // 実装はElectronのipcRenderer経由で行う
-  // ここではプレースホルダー
-  console.warn('Fallback scanning not yet implemented')
-  return []
+function toLocalTrack(base: {
+  filePath: string
+  size: number
+  modifiedAt: number
+  createdAt: number
+}): LocalTrack {
+  const sourceId = base.filePath
+
+  return {
+    id: createDomainId('local', sourceId),
+    source: 'local',
+    sourceId,
+    filePath: base.filePath,
+    title: base.filePath.split(/[\\/]/).pop() ?? 'Unknown Track',
+    artist: 'Unknown Artist',
+    album: 'Unknown Album',
+    duration: 0,
+    fileSize: base.size,
+    modifiedAt: base.modifiedAt,
+    createdAt: base.createdAt,
+    format: 'other',
+    codec: 'Unknown',
+  }
 }
 
-/**
- * スキャナークラス
- */
 export class LocalLibraryScanner {
   private config: ScannerConfig
   private isScanning = false
@@ -150,9 +83,6 @@ export class LocalLibraryScanner {
     this.config = { ...DEFAULT_CONFIG, ...config }
   }
 
-  /**
-   * スキャン実行
-   */
   async scan(
     directories?: string[],
     onProgress?: ScanProgressCallback,
@@ -162,11 +92,16 @@ export class LocalLibraryScanner {
       throw new Error('Scan already in progress')
     }
 
-    this.isScanning = true
-    this.abortController = new AbortController()
-    const dirs = directories || this.config.directories
-
     const startTime = Date.now()
+    const progress: ScanProgress = {
+      status: 'scanning',
+      totalFiles: 0,
+      processedFiles: 0,
+      foundTracks: 0,
+      errors: [],
+      startTime,
+    }
+
     const result: ScanResult = {
       tracks: [],
       errors: [],
@@ -178,102 +113,116 @@ export class LocalLibraryScanner {
       },
     }
 
-    try {
-      // 1. すべての音楽ファイルパスを収集
-      onProgress?.({
-        status: 'scanning',
-        totalFiles: 0,
-        processedFiles: 0,
-        foundTracks: 0,
-        errors: [],
-        startTime,
-      })
+    this.isScanning = true
+    this.abortController = new AbortController()
 
-      const allMusicFiles: string[] = []
-      for (const dir of dirs) {
-        if (this.abortController.signal.aborted) break
-        const files = await scanDirectory(dir, this.config, (file) => {
-          onProgress?.({
-            status: 'scanning',
-            currentFile: file,
-            totalFiles: allMusicFiles.length,
-            processedFiles: allMusicFiles.length,
-            foundTracks: result.tracks.length,
-            errors: result.errors,
-            startTime,
-          })
-        })
-        allMusicFiles.push(...files)
+    try {
+      const activeDirectories =
+        directories && directories.length > 0
+          ? directories
+          : this.config.directories
+
+      if (activeDirectories.length === 0) {
+        progress.status = 'completed'
+        onProgress?.(progress)
+        onComplete?.(result)
+        return result
       }
 
-      result.stats.totalFiles = allMusicFiles.length
-      result.stats.musicFiles = allMusicFiles.length
+      const files = await listLocalLibraryFiles(activeDirectories)
+      result.stats.totalFiles = files.length
+      result.stats.musicFiles = files.length
+      progress.totalFiles = files.length
+      onProgress?.(progress)
 
-      // 2. チャンク処理でメタデータ抽出
-      const chunks = chunkArray(allMusicFiles, this.config.chunkSize)
-      let processedCount = 0
+      await clearAllTracks()
+
+      const chunks = chunkArray(files, this.config.chunkSize)
+      const tracksToSave: LocalTrack[] = []
 
       for (const chunk of chunks) {
         if (this.abortController.signal.aborted) break
 
-        // 一時停止チェック
         while (this.isPaused && !this.abortController.signal.aborted) {
           await yieldToMainThread()
         }
 
-        // チャンク処理（メタデータ抽出は後続タスク）
-        // ここではファイルパスだけ収集
-        processedCount += chunk.length
+        for (const file of chunk) {
+          if (this.abortController.signal.aborted) break
 
-        // UI更新
-        onProgress?.({
-          status: 'scanning',
-          totalFiles: allMusicFiles.length,
-          processedFiles: processedCount,
-          foundTracks: result.tracks.length,
-          errors: result.errors,
-          startTime,
-          estimatedEndTime: this.calculateETA(
+          progress.currentFile = file.path
+
+          try {
+            const fileContent = await readLocalLibraryFile(file.path)
+            const format = detectFormat(file.path)
+            const metadata = await extractMetadata(
+              file.path,
+              fileContent.data,
+              format,
+            )
+
+            const baseTrack = toLocalTrack({
+              filePath: file.path,
+              size: file.size,
+              modifiedAt: file.modifiedAt,
+              createdAt: file.createdAt,
+            })
+
+            const mergedTrack: LocalTrack = {
+              ...baseTrack,
+              ...(metadata.track ?? {}),
+              id: createDomainId('local', baseTrack.sourceId),
+              source: 'local',
+              sourceId: baseTrack.sourceId,
+              filePath: file.path,
+              fileSize: file.size,
+              modifiedAt: file.modifiedAt,
+              createdAt: file.createdAt,
+            }
+
+            tracksToSave.push(mergedTrack)
+            result.tracks.push(mergedTrack)
+          } catch (error) {
+            const scanError = toScanError(file.path, error)
+            result.errors.push(scanError)
+            progress.errors = result.errors
+          }
+
+          progress.processedFiles += 1
+          progress.foundTracks = result.tracks.length
+          progress.estimatedEndTime = this.calculateETA(
             startTime,
-            processedCount,
-            allMusicFiles.length,
-          ),
-        })
+            progress.processedFiles,
+            progress.totalFiles,
+          )
+          onProgress?.({ ...progress })
+        }
 
-        // メインスレッドに制御を戻す
         await yieldToMainThread()
       }
 
-      result.duration = Date.now() - startTime
+      if (tracksToSave.length > 0) {
+        await saveTracksBatch(tracksToSave)
+        await buildSearchIndex(tracksToSave)
+      }
 
-      onProgress?.({
-        status: 'completed',
-        totalFiles: allMusicFiles.length,
-        processedFiles: processedCount,
-        foundTracks: result.tracks.length,
-        errors: result.errors,
-        startTime,
-      })
+      const finishedAt = Date.now()
+      await setLastScanTime(finishedAt)
 
+      result.duration = finishedAt - startTime
+      progress.status = this.abortController.signal.aborted
+        ? 'idle'
+        : 'completed'
+      onProgress?.({ ...progress })
       onComplete?.(result)
+
       return result
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-      result.errors.push({
-        filePath: '',
-        error: errorMsg,
-        timestamp: Date.now(),
-      })
-
-      onProgress?.({
-        status: 'error',
-        totalFiles: result.stats.totalFiles,
-        processedFiles: 0,
-        foundTracks: result.tracks.length,
-        errors: result.errors,
-        startTime,
-      })
-
+      const scanError = toScanError(progress.currentFile ?? '', error)
+      result.errors.push(scanError)
+      progress.status = 'error'
+      progress.errors = result.errors
+      onProgress?.({ ...progress })
       throw error
     } finally {
       this.isScanning = false
@@ -282,76 +231,53 @@ export class LocalLibraryScanner {
     }
   }
 
-  /**
-   * スキャン一時停止
-   */
   pause(): void {
     this.isPaused = true
   }
 
-  /**
-   * スキャン再開
-   */
   resume(): void {
     this.isPaused = false
   }
 
-  /**
-   * スキャン中止
-   */
   abort(): void {
     this.abortController?.abort()
   }
 
-  /**
-   * スキャン中かどうか
-   */
   get scanning(): boolean {
     return this.isScanning
   }
 
-  /**
-   * 推定終了時間を計算
-   */
+  updateConfig(config: Partial<ScannerConfig>): void {
+    if (this.isScanning) {
+      throw new Error('Cannot update config while scanning')
+    }
+
+    this.config = { ...this.config, ...config }
+  }
+
   private calculateETA(
     startTime: number,
     processed: number,
     total: number,
   ): number {
-    if (processed === 0) return 0
+    if (processed <= 0 || total <= 0) return 0
     const elapsed = Date.now() - startTime
     const rate = elapsed / processed
     const remaining = total - processed
-    return Date.now() + rate * remaining
-  }
-
-  /**
-   * 設定更新
-   */
-  updateConfig(config: Partial<ScannerConfig>): void {
-    if (this.isScanning) {
-      throw new Error('Cannot update config while scanning')
-    }
-    this.config = { ...this.config, ...config }
+    return Date.now() + rate * Math.max(0, remaining)
   }
 }
 
-// シングルトンインスタンス
 let defaultScanner: LocalLibraryScanner | null = null
 
-/**
- * デフォルトスキャナーを取得
- */
 export function getDefaultScanner(): LocalLibraryScanner {
   if (!defaultScanner) {
     defaultScanner = new LocalLibraryScanner()
   }
+
   return defaultScanner
 }
 
-/**
- * スキャン実行（簡易版）
- */
 export async function scanDirectories(
   directories: string[],
   onProgress?: ScanProgressCallback,

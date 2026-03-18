@@ -8,7 +8,7 @@
 import type { LocalTrack, MetadataParseResult } from '../types'
 
 // Workerコンテキスト型定義
-declare const self: DedicatedWorkerGlobalScope
+declare const self: Worker & typeof globalThis
 
 /**
  * Workerメッセージ型
@@ -32,16 +32,24 @@ interface ExtractErrorMessage {
   error: string
 }
 
-interface ProgressMessage {
-  type: 'progress'
-  processed: number
-  total: number
+type MetadataValue = string | number[]
+type ITunesMetadata = Record<string, MetadataValue>
+
+function getMetadataString(
+  metadata: ITunesMetadata,
+  key: string,
+): string | undefined {
+  const value = metadata[key]
+  return typeof value === 'string' ? value : undefined
 }
 
-type WorkerMessage =
-  | ExtractResultMessage
-  | ExtractErrorMessage
-  | ProgressMessage
+function getMetadataTuple(
+  metadata: ITunesMetadata,
+  key: string,
+): number[] | undefined {
+  const value = metadata[key]
+  return Array.isArray(value) ? value : undefined
+}
 
 /**
  * メタデータ抽出メイン関数
@@ -83,7 +91,6 @@ async function extractMP3Metadata(
   fileData: ArrayBuffer,
 ): Promise<MetadataParseResult> {
   try {
-    const dataView = new DataView(fileData)
     const decoder = new TextDecoder('utf-8')
 
     // ID3v2ヘッダー確認
@@ -98,8 +105,6 @@ async function extractMP3Metadata(
 
     // ID3v2バージョン取得
     const version = id3Header.charCodeAt(3)
-    const revision = id3Header.charCodeAt(4)
-
     // タグサイズ取得（同期safe integer）
     const sizeBytes = new Uint8Array(fileData.slice(6, 10))
     const tagSize =
@@ -260,7 +265,7 @@ function decodeID3Text(frameData: ArrayBuffer): string {
 
   const text = decoder.decode(textData)
   // 終端null文字を除去
-  return text.replace(/\x00+$/, '').trim()
+  return text.replaceAll('\0', '').trim()
 }
 
 /**
@@ -432,14 +437,18 @@ async function extractMP4Metadata(
       success: true,
       track: {
         ...createBasicTrack(filePath, fileData.byteLength, format),
-        title: metadata['©nam'] || getFilenameWithoutExt(filePath),
-        artist: metadata['©ART'] || 'Unknown Artist',
-        album: metadata['©alb'] || 'Unknown Album',
-        albumArtist: metadata['aART'],
-        trackNumber: metadata.trkn ? metadata.trkn[0] : undefined,
-        discNumber: metadata.disk ? metadata.disk[0] : undefined,
-        year: metadata['©day'] ? parseInt(metadata['©day'], 10) : undefined,
-        genre: metadata['©gen'],
+        title:
+          getMetadataString(metadata, '©nam') ||
+          getFilenameWithoutExt(filePath),
+        artist: getMetadataString(metadata, '©ART') || 'Unknown Artist',
+        album: getMetadataString(metadata, '©alb') || 'Unknown Album',
+        albumArtist: getMetadataString(metadata, 'aART'),
+        trackNumber: getMetadataTuple(metadata, 'trkn')?.[0],
+        discNumber: getMetadataTuple(metadata, 'disk')?.[0],
+        year: getMetadataString(metadata, '©day')
+          ? parseInt(getMetadataString(metadata, '©day') ?? '', 10)
+          : undefined,
+        genre: getMetadataString(metadata, '©gen'),
       },
     }
   } catch (error) {
@@ -453,8 +462,8 @@ async function extractMP4Metadata(
 /**
  * iTunesメタデータ（ilst）解析
  */
-function parseITunesMetadata(moovData: ArrayBuffer): Record<string, any> {
-  const metadata: Record<string, any> = {}
+function parseITunesMetadata(moovData: ArrayBuffer): ITunesMetadata {
+  const metadata: ITunesMetadata = {}
   const decoder = new TextDecoder('ascii')
   let offset = 0
 
@@ -480,10 +489,9 @@ function parseITunesMetadata(moovData: ArrayBuffer): Record<string, any> {
 /**
  * メタデータボックス解析
  */
-function parseMetadataBox(data: ArrayBuffer): Record<string, any> {
-  const metadata: Record<string, any> = {}
+function parseMetadataBox(data: ArrayBuffer): ITunesMetadata {
+  const metadata: ITunesMetadata = {}
   const decoder = new TextDecoder('ascii')
-  const textDecoder = new TextDecoder('utf-8')
   let offset = 0
 
   while (offset < data.byteLength - 8) {
@@ -512,8 +520,8 @@ function parseMetadataBox(data: ArrayBuffer): Record<string, any> {
 /**
  * iTunesアイテムリスト解析
  */
-function parseITunesItemList(data: ArrayBuffer): Record<string, any> {
-  const metadata: Record<string, any> = {}
+function parseITunesItemList(data: ArrayBuffer): ITunesMetadata {
+  const metadata: ITunesMetadata = {}
   const decoder = new TextDecoder('ascii')
   const textDecoder = new TextDecoder('utf-8')
   let offset = 0
@@ -527,7 +535,7 @@ function parseITunesItemList(data: ArrayBuffer): Record<string, any> {
 
     // データ取得（data box内）
     const itemData = data.slice(offset + 8, offset + size)
-    let value: any = null
+    let value: MetadataValue | null = null
 
     // data boxを探す
     let dataOffset = 0

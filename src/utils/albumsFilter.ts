@@ -5,6 +5,7 @@ export enum AlbumsSearchParams {
   ArtistId = 'artistId',
   ArtistName = 'artistName',
   Query = 'query',
+  Source = 'source',
 }
 
 export enum PersistedAlbumListKeys {
@@ -98,3 +99,26 @@ export enum PodcastsOrderByOptions {
   Title = 'title',
   EpisodeCount = 'episode_count',
 }
+
+export enum SourceFilters {
+  All = 'all',
+  Navidrome = 'navidrome',
+  Local = 'local',
+}
+
+export type SourceFilter = `${SourceFilters}`
+
+export const sourceFilterValues = [
+  {
+    key: SourceFilters.All,
+    label: 'source.filter.all',
+  },
+  {
+    key: SourceFilters.Navidrome,
+    label: 'source.filter.navidrome',
+  },
+  {
+    key: SourceFilters.Local,
+    label: 'source.filter.local',
+  },
+]

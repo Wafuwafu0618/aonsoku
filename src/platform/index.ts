@@ -18,6 +18,12 @@ export {
   onDownloadCompleted,
   onDownloadFailed,
 } from './adapters/download-adapter'
+// Local Library Adapter
+export {
+  listLocalLibraryFiles,
+  pickLocalLibraryDirectory,
+  readLocalLibraryFile,
+} from './adapters/local-library-adapter'
 
 // Player Adapter
 export {

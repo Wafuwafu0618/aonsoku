@@ -1,7 +1,10 @@
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { basename, extname, join } from 'node:path'
 import { is, platform } from '@electron-toolkit/utils'
-import { BrowserWindow, ipcMain, nativeTheme, shell } from 'electron'
+import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import {
   IpcChannels,
+  LocalLibraryFileEntry,
   OverlayColors,
   PlayerStatePayload,
 } from '../../preload/types'
@@ -17,6 +20,52 @@ import { playerState } from './playerState'
 import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
 import { setTaskbarButtons } from './taskbar'
 import { DEFAULT_TITLE_BAR_HEIGHT } from './titleBarOverlay'
+
+const MUSIC_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.alac'])
+
+function isMusicFile(path: string): boolean {
+  return MUSIC_EXTENSIONS.has(extname(path).toLowerCase())
+}
+
+async function walkMusicFiles(
+  dirPath: string,
+): Promise<LocalLibraryFileEntry[]> {
+  const entries = await readdir(dirPath, { withFileTypes: true })
+  const files: LocalLibraryFileEntry[] = []
+
+  for (const entry of entries) {
+    const fullPath = join(dirPath, entry.name)
+
+    if (entry.isDirectory()) {
+      try {
+        const nested = await walkMusicFiles(fullPath)
+        files.push(...nested)
+      } catch {
+        // unreadable directory is skipped
+      }
+      continue
+    }
+
+    if (!entry.isFile() || !isMusicFile(fullPath)) {
+      continue
+    }
+
+    try {
+      const fileStat = await stat(fullPath)
+      files.push({
+        path: fullPath,
+        name: entry.name,
+        size: fileStat.size,
+        modifiedAt: fileStat.mtimeMs,
+        createdAt: fileStat.birthtimeMs,
+      })
+    } catch {
+      // unreadable file is skipped
+    }
+  }
+
+  return files
+}
 
 export function setupEvents(window: BrowserWindow | null) {
   if (!window) return
@@ -158,5 +207,62 @@ export function setupIpcEvents(window: BrowserWindow | null) {
 
   ipcMain.on(IpcChannels.SaveAppSettings, (_, payload: ISettingPayload) => {
     saveAppSettings(payload)
+  })
+
+  ipcMain.removeHandler(IpcChannels.PickLocalLibraryDirectory)
+  ipcMain.handle(IpcChannels.PickLocalLibraryDirectory, async () => {
+    const result = await dialog.showOpenDialog(window, {
+      title: 'ローカルライブラリフォルダを選択',
+      properties: ['openDirectory'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    const selectedPath = result.filePaths[0]
+
+    return {
+      path: selectedPath,
+      name: basename(selectedPath),
+    }
+  })
+
+  ipcMain.removeHandler(IpcChannels.ListLocalLibraryFiles)
+  ipcMain.handle(
+    IpcChannels.ListLocalLibraryFiles,
+    async (_, directories: string[]) => {
+      const allFiles: LocalLibraryFileEntry[] = []
+
+      for (const directory of directories) {
+        try {
+          const fileStat = await stat(directory)
+          if (!fileStat.isDirectory()) continue
+
+          const files = await walkMusicFiles(directory)
+          allFiles.push(...files)
+        } catch {
+          // invalid directory is skipped
+        }
+      }
+
+      return allFiles
+    },
+  )
+
+  ipcMain.removeHandler(IpcChannels.ReadLocalLibraryFile)
+  ipcMain.handle(IpcChannels.ReadLocalLibraryFile, async (_, path: string) => {
+    const [buffer, fileStat] = await Promise.all([readFile(path), stat(path)])
+
+    return {
+      path,
+      data: buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ),
+      size: fileStat.size,
+      modifiedAt: fileStat.mtimeMs,
+      createdAt: fileStat.birthtimeMs,
+    }
   })
 }

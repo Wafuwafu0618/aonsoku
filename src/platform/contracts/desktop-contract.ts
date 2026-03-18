@@ -22,6 +22,9 @@ export type { ISettingPayload } from '../../../electron/main/core/settings'
 export {
   type IAonsokuAPI,
   IpcChannels,
+  type LocalLibraryDirectoryEntry,
+  type LocalLibraryFileContent,
+  type LocalLibraryFileEntry,
   type OverlayColors,
   type PlayerStateListenerActions,
   type PlayerStatePayload,

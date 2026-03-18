@@ -73,6 +73,23 @@ export function Player() {
   const currentSongSourceId = currentQueueItem?.sourceId ?? song?.id ?? ''
   const radio = radioList[currentSongIndex]
   const podcast = podcastList[currentSongIndex]
+  const isLocalSong =
+    currentQueueItem?.source === 'local' || song?.id?.startsWith('local:')
+
+  const currentSongSrc = useMemo(() => {
+    if (!song) return ''
+
+    if (isLocalSong && song.path) {
+      const normalizedPath = song.path.replace(/\\/g, '/')
+      const fileUrl = normalizedPath.startsWith('/')
+        ? `file://${normalizedPath}`
+        : `file:///${normalizedPath}`
+
+      return encodeURI(fileUrl)
+    }
+
+    return getSongStreamUrl(currentSongSourceId)
+  }, [currentSongSourceId, isLocalSong, song])
 
   const getAudioRef = useCallback(() => {
     if (isRadio) return radioRef
@@ -242,7 +259,7 @@ export function Player() {
       {isSong && song && (
         <AudioPlayer
           replayGain={trackReplayGain}
-          src={getSongStreamUrl(currentSongSourceId)}
+          src={currentSongSrc}
           autoPlay={isPlaying}
           audioRef={audioRef}
           loop={loopState === LoopState.One}

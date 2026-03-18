@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!cypress/**/*", "!**/*.cy.{ts,tsx}"]
+    "includes": ["**", "!cypress/**/*", "!sample/**/*", "!**/*.cy.{ts,tsx}"]
   },
   "javascript": {
     "formatter": {
@@ -137,7 +137,7 @@
         "useDefaultSwitchClauseLast": "error"
       }
     },
-    "includes": ["**", "src/**/*.css", "src/**/*.json"]
+    "includes": ["**", "!sample/**/*", "src/**/*.css", "src/**/*.json"]
   },
   "overrides": [
     {
