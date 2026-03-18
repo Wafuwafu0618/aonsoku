@@ -1,0 +1,663 @@
+/**
+ * Metadata Extraction Worker
+ *
+ * Web Workerでメタデータを抽出
+ * 重い処理をメインスレッドから分離
+ */
+
+import type { LocalTrack, MetadataParseResult } from '../types'
+
+// Workerコンテキスト型定義
+declare const self: DedicatedWorkerGlobalScope
+
+/**
+ * Workerメッセージ型
+ */
+interface ExtractMessage {
+  type: 'extract'
+  filePath: string
+  fileData: ArrayBuffer
+  format: 'mp3' | 'flac' | 'aac' | 'alac' | 'other'
+}
+
+interface ExtractResultMessage {
+  type: 'result'
+  filePath: string
+  result: MetadataParseResult
+}
+
+interface ExtractErrorMessage {
+  type: 'error'
+  filePath: string
+  error: string
+}
+
+interface ProgressMessage {
+  type: 'progress'
+  processed: number
+  total: number
+}
+
+type WorkerMessage =
+  | ExtractResultMessage
+  | ExtractErrorMessage
+  | ProgressMessage
+
+/**
+ * メタデータ抽出メイン関数
+ */
+async function extractMetadata(
+  filePath: string,
+  fileData: ArrayBuffer,
+  format: string,
+): Promise<MetadataParseResult> {
+  try {
+    // フォーマット別にパーサーを選択
+    switch (format) {
+      case 'mp3':
+        return await extractMP3Metadata(filePath, fileData)
+      case 'flac':
+        return await extractFLACMetadata(filePath, fileData)
+      case 'aac':
+      case 'alac':
+        return await extractMP4Metadata(filePath, fileData)
+      default:
+        return {
+          success: false,
+          error: `Unsupported format: ${format}`,
+        }
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * MP3/ID3v2メタデータ抽出
+ */
+async function extractMP3Metadata(
+  filePath: string,
+  fileData: ArrayBuffer,
+): Promise<MetadataParseResult> {
+  try {
+    const dataView = new DataView(fileData)
+    const decoder = new TextDecoder('utf-8')
+
+    // ID3v2ヘッダー確認
+    const id3Header = decoder.decode(fileData.slice(0, 10))
+    if (!id3Header.startsWith('ID3')) {
+      // ID3タグなし - 基本情報のみ返す
+      return {
+        success: true,
+        track: createBasicTrack(filePath, fileData.byteLength, 'mp3'),
+      }
+    }
+
+    // ID3v2バージョン取得
+    const version = id3Header.charCodeAt(3)
+    const revision = id3Header.charCodeAt(4)
+
+    // タグサイズ取得（同期safe integer）
+    const sizeBytes = new Uint8Array(fileData.slice(6, 10))
+    const tagSize =
+      ((sizeBytes[0] & 0x7f) << 21) |
+      ((sizeBytes[1] & 0x7f) << 14) |
+      ((sizeBytes[2] & 0x7f) << 7) |
+      (sizeBytes[3] & 0x7f)
+
+    // タグ本体を解析
+    const tagData = fileData.slice(10, 10 + tagSize)
+    const metadata = parseID3Frames(tagData, version)
+
+    return {
+      success: true,
+      track: {
+        ...createBasicTrack(filePath, fileData.byteLength, 'mp3'),
+        title: metadata.title || getFilenameWithoutExt(filePath),
+        artist: metadata.artist || 'Unknown Artist',
+        album: metadata.album || 'Unknown Album',
+        albumArtist: metadata.albumArtist,
+        trackNumber: metadata.trackNumber,
+        discNumber: metadata.discNumber,
+        year: metadata.year,
+        genre: metadata.genre,
+      },
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: `MP3 parse error: ${error instanceof Error ? error.message : 'Unknown'}`,
+    }
+  }
+}
+
+/**
+ * ID3v2フレーム解析
+ */
+function parseID3Frames(
+  tagData: ArrayBuffer,
+  version: number,
+): {
+  title?: string
+  artist?: string
+  album?: string
+  albumArtist?: string
+  trackNumber?: number
+  discNumber?: number
+  year?: number
+  genre?: string
+} {
+  const result: ReturnType<typeof parseID3Frames> = {}
+  const dataView = new DataView(tagData)
+  const decoder = new TextDecoder('utf-8')
+
+  let offset = version >= 3 ? 0 : 0 // ID3v2.2は別処理が必要
+  const tagSize = tagData.byteLength
+
+  while (offset < tagSize - 10) {
+    // フレームID取得
+    let frameId: string
+    let frameSize: number
+
+    if (version >= 3) {
+      // ID3v2.3/2.4
+      frameId = decoder.decode(tagData.slice(offset, offset + 4))
+      frameSize = dataView.getUint32(offset + 4, false)
+      // frameFlags = dataView.getUint16(offset + 8, false)
+      offset += 10
+    } else {
+      // ID3v2.2（3文字ID）
+      frameId = decoder.decode(tagData.slice(offset, offset + 3))
+      frameSize =
+        (dataView.getUint8(offset + 3) << 16) |
+        (dataView.getUint8(offset + 4) << 8) |
+        dataView.getUint8(offset + 5)
+      offset += 6
+    }
+
+    if (frameId === '\x00\x00\x00\x00' || frameId === '\x00\x00\x00') {
+      break // パディング到達
+    }
+
+    const frameData = tagData.slice(offset, offset + frameSize)
+    const text = decodeID3Text(frameData)
+
+    // 主要フレームを抽出
+    switch (frameId) {
+      case 'TIT2': // タイトル
+      case 'TT2': // ID3v2.2
+        result.title = text
+        break
+      case 'TPE1': // アーティスト
+      case 'TP1': // ID3v2.2
+        result.artist = text
+        break
+      case 'TALB': // アルバム
+      case 'TAL': // ID3v2.2
+        result.album = text
+        break
+      case 'TPE2': // アルバムアーティスト
+      case 'TP2': // ID3v2.2
+        result.albumArtist = text
+        break
+      case 'TRCK': // トラック番号
+      case 'TRK': // ID3v2.2
+        result.trackNumber = parseInt(text.split('/')[0], 10) || undefined
+        break
+      case 'TPOS': // ディスク番号
+      case 'TPA': // ID3v2.2
+        result.discNumber = parseInt(text.split('/')[0], 10) || undefined
+        break
+      case 'TYER': // 年（ID3v2.3）
+      case 'TYE': // ID3v2.2
+        result.year = parseInt(text, 10) || undefined
+        break
+      case 'TDRC': // 録音日時（ID3v2.4）
+        result.year = parseInt(text.substring(0, 4), 10) || undefined
+        break
+      case 'TCON': // ジャンル
+      case 'TCO': // ID3v2.2
+        result.genre = text.replace(/^\(\d+\)/, '') // (13)Pop → Pop
+        break
+    }
+
+    offset += frameSize
+  }
+
+  return result
+}
+
+/**
+ * ID3テキストフレームデコード
+ */
+function decodeID3Text(frameData: ArrayBuffer): string {
+  if (frameData.byteLength < 1) return ''
+
+  const dataView = new DataView(frameData)
+  const encoding = dataView.getUint8(0)
+  const textData = frameData.slice(1)
+
+  let decoder: TextDecoder
+  switch (encoding) {
+    case 0: // ISO-8859-1
+      decoder = new TextDecoder('iso-8859-1')
+      break
+    case 1: // UTF-16 with BOM
+      decoder = new TextDecoder('utf-16')
+      break
+    case 2: // UTF-16BE without BOM
+      decoder = new TextDecoder('utf-16be')
+      break
+    case 3: // UTF-8
+      decoder = new TextDecoder('utf-8')
+      break
+    default:
+      decoder = new TextDecoder('utf-8')
+  }
+
+  const text = decoder.decode(textData)
+  // 終端null文字を除去
+  return text.replace(/\x00+$/, '').trim()
+}
+
+/**
+ * FLAC/Vorbisメタデータ抽出
+ */
+async function extractFLACMetadata(
+  filePath: string,
+  fileData: ArrayBuffer,
+): Promise<MetadataParseResult> {
+  try {
+    const decoder = new TextDecoder('utf-8')
+
+    // fLaCマーカー確認
+    const marker = decoder.decode(fileData.slice(0, 4))
+    if (marker !== 'fLaC') {
+      return {
+        success: false,
+        error: 'Invalid FLAC file: missing fLaC marker',
+      }
+    }
+
+    let offset = 4
+    const metadata: Record<string, string> = {}
+
+    // メタデータブロックを解析
+    while (offset < fileData.byteLength) {
+      const blockHeader = new DataView(fileData.slice(offset, offset + 4))
+      const blockType = blockHeader.getUint8(0) & 0x7f
+      const isLast = (blockHeader.getUint8(0) & 0x80) !== 0
+      const blockSize =
+        (blockHeader.getUint8(1) << 16) |
+        (blockHeader.getUint8(2) << 8) |
+        blockHeader.getUint8(3)
+
+      offset += 4
+
+      if (blockType === 4) {
+        // VORBIS_COMMENTブロック
+        const vorbisData = fileData.slice(offset, offset + blockSize)
+        parseVorbisComment(vorbisData, metadata)
+        break // 必要なメタデータ取得済み
+      }
+
+      if (isLast) break
+      offset += blockSize
+    }
+
+    return {
+      success: true,
+      track: {
+        ...createBasicTrack(filePath, fileData.byteLength, 'flac'),
+        title: metadata.TITLE || getFilenameWithoutExt(filePath),
+        artist: metadata.ARTIST || 'Unknown Artist',
+        album: metadata.ALBUM || 'Unknown Album',
+        albumArtist: metadata.ALBUMARTIST,
+        trackNumber: metadata.TRACKNUMBER
+          ? parseInt(metadata.TRACKNUMBER, 10)
+          : undefined,
+        discNumber: metadata.DISCNUMBER
+          ? parseInt(metadata.DISCNUMBER, 10)
+          : undefined,
+        year: metadata.DATE
+          ? parseInt(metadata.DATE.substring(0, 4), 10)
+          : undefined,
+        genre: metadata.GENRE,
+      },
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: `FLAC parse error: ${error instanceof Error ? error.message : 'Unknown'}`,
+    }
+  }
+}
+
+/**
+ * Vorbis Comment解析
+ */
+function parseVorbisComment(
+  data: ArrayBuffer,
+  metadata: Record<string, string>,
+): void {
+  const dataView = new DataView(data)
+  const decoder = new TextDecoder('utf-8')
+  let offset = 0
+
+  // vendor string length
+  const vendorLength = dataView.getUint32(offset, true)
+  offset += 4
+
+  // vendor string (skip)
+  offset += vendorLength
+
+  // user comment list length
+  const commentCount = dataView.getUint32(offset, true)
+  offset += 4
+
+  // comments
+  for (let i = 0; i < commentCount && offset < data.byteLength; i++) {
+    const commentLength = dataView.getUint32(offset, true)
+    offset += 4
+
+    const commentData = data.slice(offset, offset + commentLength)
+    const comment = decoder.decode(commentData)
+    offset += commentLength
+
+    // "FIELD=value"形式を解析
+    const eqIndex = comment.indexOf('=')
+    if (eqIndex > 0) {
+      const field = comment.substring(0, eqIndex).toUpperCase()
+      const value = comment.substring(eqIndex + 1)
+      metadata[field] = value
+    }
+  }
+}
+
+/**
+ * MP4（AAC/ALAC）メタデータ抽出
+ */
+async function extractMP4Metadata(
+  filePath: string,
+  fileData: ArrayBuffer,
+): Promise<MetadataParseResult> {
+  try {
+    // ftypボックス確認
+    const decoder = new TextDecoder('ascii')
+    const ftypType = decoder.decode(fileData.slice(4, 8))
+
+    if (ftypType !== 'ftyp') {
+      return {
+        success: false,
+        error: 'Invalid MP4 file: missing ftyp box',
+      }
+    }
+
+    // moovボックスを探す
+    let offset = 0
+    let moovData: ArrayBuffer | null = null
+
+    while (offset < fileData.byteLength - 8) {
+      const size = new DataView(fileData.slice(offset, offset + 4)).getUint32(
+        0,
+        false,
+      )
+      const type = decoder.decode(fileData.slice(offset + 4, offset + 8))
+
+      if (type === 'moov') {
+        moovData = fileData.slice(offset + 8, offset + size)
+        break
+      }
+
+      offset += size
+    }
+
+    if (!moovData) {
+      return {
+        success: false,
+        error: 'MP4 moov box not found',
+      }
+    }
+
+    // udta/meta/ilstからiTunesメタデータを抽出
+    const metadata = parseITunesMetadata(moovData)
+
+    // コーデック判定（ALAC vs AAC）
+    const format = detectMP4Codec(fileData)
+
+    return {
+      success: true,
+      track: {
+        ...createBasicTrack(filePath, fileData.byteLength, format),
+        title: metadata['©nam'] || getFilenameWithoutExt(filePath),
+        artist: metadata['©ART'] || 'Unknown Artist',
+        album: metadata['©alb'] || 'Unknown Album',
+        albumArtist: metadata['aART'],
+        trackNumber: metadata.trkn ? metadata.trkn[0] : undefined,
+        discNumber: metadata.disk ? metadata.disk[0] : undefined,
+        year: metadata['©day'] ? parseInt(metadata['©day'], 10) : undefined,
+        genre: metadata['©gen'],
+      },
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: `MP4 parse error: ${error instanceof Error ? error.message : 'Unknown'}`,
+    }
+  }
+}
+
+/**
+ * iTunesメタデータ（ilst）解析
+ */
+function parseITunesMetadata(moovData: ArrayBuffer): Record<string, any> {
+  const metadata: Record<string, any> = {}
+  const decoder = new TextDecoder('ascii')
+  let offset = 0
+
+  while (offset < moovData.byteLength - 8) {
+    const size = new DataView(moovData.slice(offset, offset + 4)).getUint32(
+      0,
+      false,
+    )
+    const type = decoder.decode(moovData.slice(offset + 4, offset + 8))
+
+    if (type === 'udta') {
+      // udta内を探索
+      const udtaData = moovData.slice(offset + 8, offset + size)
+      return parseMetadataBox(udtaData)
+    }
+
+    offset += size
+  }
+
+  return metadata
+}
+
+/**
+ * メタデータボックス解析
+ */
+function parseMetadataBox(data: ArrayBuffer): Record<string, any> {
+  const metadata: Record<string, any> = {}
+  const decoder = new TextDecoder('ascii')
+  const textDecoder = new TextDecoder('utf-8')
+  let offset = 0
+
+  while (offset < data.byteLength - 8) {
+    const size = new DataView(data.slice(offset, offset + 4)).getUint32(
+      0,
+      false,
+    )
+    const type = decoder.decode(data.slice(offset + 4, offset + 8))
+
+    if (type === 'meta') {
+      // meta box（version/flagsスキップ）
+      const metaData = data.slice(offset + 12, offset + size)
+      return parseMetadataBox(metaData)
+    } else if (type === 'ilst') {
+      // iTunes item list
+      const ilstData = data.slice(offset + 8, offset + size)
+      return parseITunesItemList(ilstData)
+    }
+
+    offset += size
+  }
+
+  return metadata
+}
+
+/**
+ * iTunesアイテムリスト解析
+ */
+function parseITunesItemList(data: ArrayBuffer): Record<string, any> {
+  const metadata: Record<string, any> = {}
+  const decoder = new TextDecoder('ascii')
+  const textDecoder = new TextDecoder('utf-8')
+  let offset = 0
+
+  while (offset < data.byteLength - 8) {
+    const size = new DataView(data.slice(offset, offset + 4)).getUint32(
+      0,
+      false,
+    )
+    const itemType = decoder.decode(data.slice(offset + 4, offset + 8))
+
+    // データ取得（data box内）
+    const itemData = data.slice(offset + 8, offset + size)
+    let value: any = null
+
+    // data boxを探す
+    let dataOffset = 0
+    while (dataOffset < itemData.byteLength - 8) {
+      const dataSize = new DataView(
+        itemData.slice(dataOffset, dataOffset + 4),
+      ).getUint32(0, false)
+      const dataType = decoder.decode(
+        itemData.slice(dataOffset + 4, dataOffset + 8),
+      )
+
+      if (dataType === 'data') {
+        // data box: version(1) + flags(3) + null(4) + value
+        const valueData = itemData.slice(dataOffset + 16, dataOffset + dataSize)
+
+        // trknやdiskはバイナリ構造
+        if (itemType === 'trkn' || itemType === 'disk') {
+          const view = new DataView(valueData)
+          const current = view.getUint16(2, false)
+          const total = view.getUint16(4, false)
+          value = [current, total]
+        } else {
+          value = textDecoder.decode(valueData)
+        }
+        break
+      }
+
+      dataOffset += dataSize
+    }
+
+    if (value !== null) {
+      metadata[itemType] = value
+    }
+
+    offset += size
+  }
+
+  return metadata
+}
+
+/**
+ * MP4コーデック判定
+ */
+function detectMP4Codec(fileData: ArrayBuffer): 'aac' | 'alac' {
+  // stsdボックス内のコーデックタイプを確認
+  // 簡易判定: ファイル拡張子で判定（実際にはmoov/trak/mdia/minf/stbl/stsdを解析する必要あり）
+  // ここでは'alac'を含むかどうかで判定（簡易）
+  const decoder = new TextDecoder('ascii')
+  const searchLength = Math.min(fileData.byteLength, 100000) // 先頭100KBのみ
+  const text = decoder.decode(fileData.slice(0, searchLength))
+
+  return text.includes('alac') ? 'alac' : 'aac'
+}
+
+/**
+ * 基本トラック情報作成
+ */
+function createBasicTrack(
+  filePath: string,
+  fileSize: number,
+  format: 'mp3' | 'flac' | 'aac' | 'alac' | 'other',
+): Partial<LocalTrack> {
+  const now = Date.now()
+
+  return {
+    source: 'local',
+    sourceId: generateFileHash(filePath),
+    filePath,
+    fileSize,
+    format,
+    codec:
+      format === 'mp3'
+        ? 'MP3'
+        : format === 'flac'
+          ? 'FLAC'
+          : format === 'aac'
+            ? 'AAC'
+            : format === 'alac'
+              ? 'ALAC'
+              : 'Unknown',
+    modifiedAt: now, // 実際にはファイルシステムから取得
+    createdAt: now,
+  }
+}
+
+/**
+ * ファイルパスからハッシュ生成
+ */
+function generateFileHash(filePath: string): string {
+  // 簡易ハッシュ（実際にはより堅牢なハッシュ関数を使用）
+  let hash = 0
+  for (let i = 0; i < filePath.length; i++) {
+    const char = filePath.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash = hash & hash // 32bit整数に収める
+  }
+  return `local-${Math.abs(hash).toString(16).padStart(8, '0')}`
+}
+
+/**
+ * ファイル名（拡張子なし）を取得
+ */
+function getFilenameWithoutExt(filePath: string): string {
+  const parts = filePath.split(/[\\/]/)
+  const filename = parts[parts.length - 1]
+  const lastDot = filename.lastIndexOf('.')
+  return lastDot === -1 ? filename : filename.substring(0, lastDot)
+}
+
+// Workerメッセージハンドラ
+self.onmessage = async (event: MessageEvent<ExtractMessage>) => {
+  const { type, filePath, fileData, format } = event.data
+
+  if (type === 'extract') {
+    const result = await extractMetadata(filePath, fileData, format)
+
+    if (result.success) {
+      self.postMessage({
+        type: 'result',
+        filePath,
+        result,
+      } as ExtractResultMessage)
+    } else {
+      self.postMessage({
+        type: 'error',
+        filePath,
+        error: result.error || 'Unknown error',
+      } as ExtractErrorMessage)
+    }
+  }
+}
+
+export {}

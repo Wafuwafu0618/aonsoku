@@ -99,3 +99,12 @@ export type ScanProgressCallback = (progress: ScanProgress) => void
  * スキャン完了コールバック
  */
 export type ScanCompleteCallback = (result: ScanResult) => void
+
+/**
+ * メタデータ抽出結果
+ */
+export interface MetadataParseResult {
+  success: boolean
+  track?: Partial<LocalTrack>
+  error?: string
+}
