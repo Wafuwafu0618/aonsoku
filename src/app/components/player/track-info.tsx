@@ -8,9 +8,10 @@ import { Link } from 'react-router-dom'
 
 import { MarqueeTitle } from '@/app/components/fullscreen/marquee-title'
 import { ImageLoader } from '@/app/components/image-loader'
+import { SourceBadge } from '@/app/components/source-badge'
 import { cn } from '@/lib/utils'
 import { ROUTES } from '@/routes/routesList'
-import { useSongColor } from '@/store/player.store'
+import { usePlaybackQueueState, useSongColor } from '@/store/player.store'
 import { ISong } from '@/types/responses/song'
 import { getAverageColor } from '@/utils/getAverageColor'
 import { logger } from '@/utils/logger'
@@ -19,6 +20,7 @@ import { ALBUM_ARTISTS_MAX_NUMBER } from '@/utils/multipleArtists'
 export function TrackInfo({ song }: { song: ISong | undefined }) {
   const { t } = useTranslation()
   const { setCurrentSongColor, currentSongColor } = useSongColor()
+  const { currentQueueItem } = usePlaybackQueueState()
 
   const getImageElement = useCallback(() => {
     return document.getElementById('track-song-image') as HTMLImageElement
@@ -104,7 +106,13 @@ export function TrackInfo({ song }: { song: ISong | undefined }) {
             </span>
           </Link>
         </MarqueeTitle>
-        <TrackInfoArtistsLinks song={song} />
+        <div className="flex items-center gap-2">
+          <TrackInfoArtistsLinks song={song} />
+          {/* WP5: Sourceバッジ表示（songの場合のみ） */}
+          {currentQueueItem?.source && (
+            <SourceBadge source={currentQueueItem.source} showLabel={false} />
+          )}
+        </div>
       </div>
     </Fragment>
   )

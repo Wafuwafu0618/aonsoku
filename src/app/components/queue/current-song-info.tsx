@@ -2,15 +2,21 @@ import { LazyLoadImage } from 'react-lazy-load-image-component'
 import { Link } from 'react-router-dom'
 import { ImageLoader } from '@/app/components/image-loader'
 import { LinkWithoutTo } from '@/app/components/song/artist-link'
+import { SourceBadge } from '@/app/components/source-badge'
 import { AspectRatio } from '@/app/components/ui/aspect-ratio'
 import { cn } from '@/lib/utils'
 import { ROUTES } from '@/routes/routesList'
-import { useMainDrawerState, usePlayerSonglist } from '@/store/player.store'
+import {
+  useMainDrawerState,
+  usePlaybackQueueState,
+  usePlayerSonglist,
+} from '@/store/player.store'
 import { ISong } from '@/types/responses/song'
 import { ALBUM_ARTISTS_MAX_NUMBER } from '@/utils/multipleArtists'
 
 export function CurrentSongInfo() {
   const { currentSong } = usePlayerSonglist()
+  const { currentQueueItem } = usePlaybackQueueState()
   const { closeDrawer } = useMainDrawerState()
 
   return (
@@ -52,6 +58,12 @@ export function CurrentSongInfo() {
         <div className="leading-5 mt-1 text-foreground/70 text-shadow-lg flex items-center justify-center flex-wrap gap-1">
           <QueueArtistsLinks song={currentSong} />
         </div>
+        {/* WP5: Sourceバッジ表示（songの場合のみ） */}
+        {currentQueueItem?.source && (
+          <div className="mt-3">
+            <SourceBadge source={currentQueueItem.source} />
+          </div>
+        )}
       </div>
     </div>
   )
