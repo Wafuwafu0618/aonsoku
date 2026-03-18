@@ -1,8 +1,12 @@
 import { shallow } from 'zustand/shallow'
+import {
+  onPlayerAction,
+  sendCurrentSongToDiscord,
+  updatePlayerState,
+} from '@/platform'
 import { scrobble } from '@/service/scrobble'
 import { IPlayerContext } from '@/types/playerContext'
 import { isDesktop } from '@/utils/desktop'
-import { discordRpc } from '@/utils/discordRpc'
 import { idbStorage } from './idb'
 import { PlaybackSessionState } from './playback-session.store'
 
@@ -89,7 +93,7 @@ export function initializePlayerController({
   playerStore.subscribe(
     (state: IPlayerContext) => [state.songlist.currentSong],
     () => {
-      discordRpc.sendCurrentSong()
+      sendCurrentSongToDiscord()
     },
     {
       equalityFn: shallow,
@@ -99,7 +103,7 @@ export function initializePlayerController({
   playbackSessionStore.subscribe(
     (state: PlaybackSessionState) => [state.isPlaying, state.currentDuration],
     () => {
-      discordRpc.sendCurrentSong()
+      sendCurrentSongToDiscord()
     },
     {
       equalityFn: shallow,
@@ -144,7 +148,7 @@ export function initializePlayerController({
     const { togglePlayPause, playPrevSong, playNextSong } =
       playerStore.getState().actions
 
-    window.api.playerStateListener((action) => {
+    onPlayerAction((action) => {
       if (action === 'togglePlayPause') togglePlayPause()
       if (action === 'skipBackwards') playPrevSong()
       if (action === 'skipForward') playNextSong()
@@ -158,7 +162,7 @@ export function initializePlayerController({
     const { currentList, podcastList, radioList } =
       playerStore.getState().songlist
 
-    window.api.updatePlayerState({
+    updatePlayerState({
       isPlaying,
       hasPrevious: hasPrev,
       hasNext,
