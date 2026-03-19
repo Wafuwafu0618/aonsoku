@@ -260,6 +260,7 @@ export function Player() {
         <AudioPlayer
           replayGain={trackReplayGain}
           src={currentSongSrc}
+          durationSeconds={song.duration}
           autoPlay={isPlaying}
           audioRef={audioRef}
           loop={loopState === LoopState.One}

@@ -9,6 +9,11 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'react-toastify'
 import { NativeAudioOutputMode } from '@/platform/contracts/desktop-contract'
+import {
+  createRuntimeOversamplingCapability,
+  OVERSAMPLING_OUTPUT_APIS,
+  OversamplingCapability,
+} from '@/oversampling'
 import { PlaybackBackend } from '@/playback/backend'
 import { NativePlaybackBackend } from '@/playback/backends/native-backend'
 import { createSongPlaybackBackend } from '@/playback/backends/song-backend-factory'
@@ -18,6 +23,7 @@ import {
   usePlayerActions,
   usePlayerIsPlaying,
   usePlayerMediaType,
+  useOversamplingActions,
   useOversamplingState,
   usePlayerVolume,
   useReplayGainActions,
@@ -29,21 +35,72 @@ import { calculateReplayGain, ReplayGainParams } from '@/utils/replayGain'
 type AudioPlayerProps = ComponentPropsWithoutRef<'audio'> & {
   audioRef: RefObject<HTMLAudioElement>
   replayGain?: ReplayGainParams
+  durationSeconds?: number
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+
+  return String(error)
 }
 
 function shouldUseNativeBackendForSong(
   isSong: boolean,
   oversamplingEnabled: boolean,
   outputApi: NativeAudioOutputMode,
+  outputApiSupported: boolean,
 ): boolean {
-  if (!isSong || !oversamplingEnabled) return false
+  if (!isSong || !oversamplingEnabled || !outputApiSupported) return false
 
-  return outputApi === 'wasapi-shared'
+  return outputApi === 'wasapi-shared' || outputApi === 'wasapi-exclusive'
+}
+
+function areStringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+
+  return a.every((value, index) => value === b[index])
+}
+
+function areCapabilitiesEqual(
+  current: OversamplingCapability,
+  next: OversamplingCapability,
+): boolean {
+  if (
+    !areStringArraysEqual(
+      current.supportedOutputApis,
+      next.supportedOutputApis,
+    )
+  ) {
+    return false
+  }
+
+  if (!areStringArraysEqual(current.availableEngines, next.availableEngines)) {
+    return false
+  }
+
+  const engines = [...new Set([...current.availableEngines, ...next.availableEngines])]
+
+  return engines.every(
+    (engine) =>
+      (current.maxTapCountByEngine?.[engine] ?? null) ===
+      (next.maxTapCountByEngine?.[engine] ?? null),
+  )
 }
 
 export function AudioPlayer({
   audioRef,
   replayGain,
+  durationSeconds,
   ...props
 }: AudioPlayerProps) {
   const { t } = useTranslation()
@@ -59,9 +116,13 @@ export function AudioPlayer({
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
     usePlayerActions()
+  const { setCapability, setEnginePreference, setOutputApi } =
+    useOversamplingActions()
   const { setReplayGainEnabled, setReplayGainError } = useReplayGainActions()
   const { volume } = usePlayerVolume()
   const isPlaying = usePlayerIsPlaying()
+  const isPlayingRef = useRef(isPlaying)
+  isPlayingRef.current = isPlaying
   const songBackendRef = useRef<PlaybackBackend | null>(null)
   const audioPipelineRef = useRef<PlayerAudioPipeline>(new PlayerAudioPipeline())
   const lastOversamplingFailureRef = useRef<string | null>(null)
@@ -69,12 +130,84 @@ export function AudioPlayer({
   const { src, loop, autoPlay, ...audioProps } = props
 
   const nativeOutputMode = oversamplingOutputApi as NativeAudioOutputMode
+  const isSelectedOutputApiSupported =
+    oversamplingCapability.supportedOutputApis.includes(oversamplingOutputApi)
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
     nativeOutputMode,
+    isSelectedOutputApiSupported,
   )
   const useWebAudioSongPath = isSong && !useNativeSongBackend
+  const shouldAttachWebAudioGraph =
+    useWebAudioSongPath && (replayGainEnabled || oversamplingEnabled)
+
+  useEffect(() => {
+    const api =
+      typeof window !== 'undefined' ? (window as Window & { api?: unknown }).api : null
+    if (
+      !api ||
+      typeof api !== 'object' ||
+      !('nativeAudioListDevices' in api) ||
+      typeof api.nativeAudioListDevices !== 'function'
+    ) {
+      return
+    }
+
+    let cancelled = false
+
+    async function syncCapabilityFromNativeDevices(): Promise<void> {
+      try {
+        const nativeApi = api as {
+          nativeAudioListDevices: () => Promise<
+            Array<{ mode: NativeAudioOutputMode }>
+          >
+        }
+        const devices = await nativeApi.nativeAudioListDevices()
+        if (cancelled) return
+
+        const supportedOutputApis = OVERSAMPLING_OUTPUT_APIS.filter((mode) =>
+          devices.some((device) => device.mode === mode),
+        )
+        const nextCapability = createRuntimeOversamplingCapability({
+          supportedOutputApis,
+          availableEngines: ['cpu'],
+        })
+
+        if (!areCapabilitiesEqual(oversamplingCapability, nextCapability)) {
+          setCapability(nextCapability)
+        }
+
+        if (!nextCapability.supportedOutputApis.includes(oversamplingOutputApi)) {
+          setOutputApi(nextCapability.supportedOutputApis[0] ?? 'wasapi-shared')
+        }
+
+        if (
+          oversamplingEnginePreference !== 'auto' &&
+          !nextCapability.availableEngines.includes(oversamplingEnginePreference)
+        ) {
+          setEnginePreference(nextCapability.availableEngines[0] ?? 'auto')
+        }
+      } catch (error) {
+        logger.warn('Failed to sync oversampling capability from native devices', {
+          error,
+        })
+      }
+    }
+
+    syncCapabilityFromNativeDevices()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    oversamplingCapability,
+    oversamplingEnginePreference,
+    oversamplingOutputApi,
+    setCapability,
+    setEnginePreference,
+    setOutputApi,
+  ])
 
   const gainValue = useMemo(() => {
     const audioVolume = volume / 100
@@ -90,10 +223,10 @@ export function AudioPlayer({
   useEffect(() => {
     audioPipelineRef.current.syncAudioTarget({
       audio: audioRef.current,
-      isSong: useWebAudioSongPath,
+      isSong: shouldAttachWebAudioGraph,
       replayGainError,
     })
-  }, [audioRef, useWebAudioSongPath, replayGainError])
+  }, [audioRef, shouldAttachWebAudioGraph, replayGainError])
 
   useEffect(() => {
     audioPipelineRef.current.applyReplayGain({
@@ -162,10 +295,60 @@ export function AudioPlayer({
     t,
   ])
 
+  const handleSongError = useCallback(
+    ({
+      native = false,
+      reason,
+    }: {
+      native?: boolean
+      reason?: unknown
+    } = {}) => {
+      if (reason !== undefined) {
+        logger.error('Song playback error detail', describeError(reason))
+      }
+
+      if (native || useNativeSongBackend) {
+        toast.error(t('warnings.songError'))
+        setPlayingState(false)
+        return
+      }
+
+      const audio = audioRef.current
+      if (!audio) return
+
+      logger.error('Audio load error', {
+        src: audio.src,
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+        error: audio.error,
+      })
+
+      toast.error(t('warnings.songError'))
+
+      if (replayGainEnabled || !replayGainError) {
+        setReplayGainEnabled(false)
+        setReplayGainError(true)
+        window.location.reload()
+      }
+    },
+    [
+      audioRef,
+      replayGainEnabled,
+      replayGainError,
+      setPlayingState,
+      setReplayGainEnabled,
+      setReplayGainError,
+      t,
+      useNativeSongBackend,
+    ],
+  )
+
   useEffect(() => {
     const audio = audioRef.current
 
     if (!isSong || !audio || typeof src !== 'string' || src.length === 0) return
+
+    let cancelled = false
 
     const nextBackendId = useNativeSongBackend ? 'native' : 'internal'
     const currentBackend = songBackendRef.current
@@ -182,63 +365,101 @@ export function AudioPlayer({
     const backend = songBackendRef.current
     if (!backend) return
 
-    if (backend instanceof NativePlaybackBackend) {
-      backend.setOutputMode(nativeOutputMode).catch((error) => {
-        logger.error('Native output mode update failed', error)
-      })
+    async function configureAndLoadSong(): Promise<void> {
+      try {
+        if (backend instanceof NativePlaybackBackend) {
+          await backend.setOutputMode(nativeOutputMode)
+          const resolvedMode = backend.getOutputMode()
+          if (!cancelled && resolvedMode !== nativeOutputMode) {
+            setOutputApi(resolvedMode)
+          }
+        }
+
+        if (cancelled) return
+
+        await backend.load({
+          src,
+          loop,
+          autoplay: isPlayingRef.current,
+          durationSeconds,
+        })
+
+        if (backend instanceof NativePlaybackBackend) {
+          const resolvedMode = backend.getOutputMode()
+          if (!cancelled && resolvedMode !== nativeOutputMode) {
+            setOutputApi(resolvedMode)
+          }
+        }
+      } catch (error) {
+        if (cancelled) return
+
+        logger.error('Audio source load failed', describeError(error))
+
+        if (!(backend instanceof NativePlaybackBackend)) {
+          handleSongError({ reason: error })
+          return
+        }
+
+        try {
+          await backend.setOutputMode('wasapi-shared')
+
+          if (cancelled) return
+
+          if (nativeOutputMode === 'wasapi-exclusive') {
+            setOutputApi('wasapi-shared')
+          }
+
+          await backend.load({
+            src,
+            loop,
+            autoplay: isPlayingRef.current,
+            durationSeconds,
+          })
+
+          if (backend instanceof NativePlaybackBackend) {
+            const resolvedMode = backend.getOutputMode()
+            if (!cancelled && resolvedMode !== nativeOutputMode) {
+              setOutputApi(resolvedMode)
+            }
+          }
+        } catch (fallbackError) {
+          if (cancelled) return
+
+          logger.error(
+            'Audio source load retry failed after shared fallback',
+            describeError(fallbackError),
+          )
+          handleSongError({
+            native: true,
+            reason: fallbackError,
+          })
+        }
+      }
     }
 
-    backend
-      .load({
-        src,
-        loop,
-        autoplay: isPlaying,
-      })
-      .catch((error) => {
-        logger.error('Audio source load failed', error)
-      })
+    configureAndLoadSong().catch((error) => {
+      logger.error('configureAndLoadSong failed', describeError(error))
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [
     audioRef,
+    handleSongError,
     isSong,
-    isPlaying,
     loop,
     nativeOutputMode,
+    setOutputApi,
     src,
+    durationSeconds,
     useNativeSongBackend,
   ])
-
   useEffect(() => {
     if (!isSong) return
 
     songBackendRef.current?.setVolume(volume / 100)
   }, [isSong, volume])
-
-  const handleSongError = useCallback(() => {
-    const audio = audioRef.current
-    if (!audio) return
-
-    logger.error('Audio load error', {
-      src: audio.src,
-      networkState: audio.networkState,
-      readyState: audio.readyState,
-      error: audio.error,
-    })
-
-    toast.error(t('warnings.songError'))
-
-    if (replayGainEnabled || !replayGainError) {
-      setReplayGainEnabled(false)
-      setReplayGainError(true)
-      window.location.reload()
-    }
-  }, [
-    audioRef,
-    replayGainEnabled,
-    replayGainError,
-    setReplayGainEnabled,
-    setReplayGainError,
-    t,
-  ])
 
   const handleRadioError = useCallback(() => {
     const audio = audioRef.current
@@ -283,6 +504,14 @@ export function AudioPlayer({
       }
 
       if (type === 'error') {
+        if (backend instanceof NativePlaybackBackend) {
+          logger.warn(
+            '[NativePlaybackBackend] Ignoring transient backend error event during recovery',
+            describeError(snapshot.error),
+          )
+          return
+        }
+
         handleSongError()
       }
     }
@@ -308,11 +537,21 @@ export function AudioPlayer({
             await audioPipelineRef.current.resumeIfNeeded()
           }
           await backend.play()
+
+          if (backend instanceof NativePlaybackBackend) {
+            const resolvedMode = backend.getOutputMode()
+            if (resolvedMode !== nativeOutputMode) {
+              setOutputApi(resolvedMode)
+            }
+          }
         } else {
-          backend.pause()
+          const snapshot = backend.getSnapshot()
+          if (snapshot.isPlaying || snapshot.status === 'playing') {
+            backend.pause()
+          }
         }
       } catch (error) {
-        logger.error('Audio playback failed', error)
+        logger.error('Audio playback failed', describeError(error))
         handleSongError()
       }
     }
@@ -328,7 +567,7 @@ export function AudioPlayer({
           audio.pause()
         }
       } catch (error) {
-        logger.error('Audio playback failed', error)
+        logger.error('Audio playback failed', describeError(error))
         handleSongError()
       }
     }
@@ -347,6 +586,8 @@ export function AudioPlayer({
     isPlaying,
     isSong,
     isPodcast,
+    nativeOutputMode,
+    setOutputApi,
     useWebAudioSongPath,
   ])
 
@@ -366,11 +607,11 @@ export function AudioPlayer({
   }, [audioRef, isPlaying, isRadio])
 
   const handleError = useMemo(() => {
-    if (isSong) return handleSongError
+    if (isSong && useWebAudioSongPath) return handleSongError
     if (isRadio) return handleRadioError
 
     return undefined
-  }, [handleRadioError, handleSongError, isRadio, isSong])
+  }, [handleRadioError, handleSongError, isRadio, isSong, useWebAudioSongPath])
 
   const crossOrigin = useMemo(() => {
     if (!useWebAudioSongPath || replayGainError) return undefined

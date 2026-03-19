@@ -26,6 +26,20 @@ const capabilities: PlaybackBackendCapabilities = {
   emitsTimeUpdates: true,
 }
 
+const EXCLUSIVE_RECOVERABLE_ERROR_CODES = new Set([
+  'exclusive-preview-disabled',
+  'exclusive-device-busy',
+  'exclusive-not-allowed',
+  'exclusive-format-unsupported',
+  'exclusive-device-unavailable',
+  'exclusive-open-failed',
+  'output-init-failed',
+])
+const EXCLUSIVE_DEVICE_CHANGED_DEBOUNCE_MS = 900
+const EXCLUSIVE_RETRY_DELAYS_MS = [300, 700, 1500]
+const EXCLUSIVE_WAIT_FOR_NEXT_DEVICE_CHANGE_MS = 3500
+const DEVICE_CHANGE_POLL_INTERVAL_MS = 100
+
 function clampVolume(volume: number): number {
   if (Number.isNaN(volume)) return 1
   if (volume < 0) return 0
@@ -38,6 +52,12 @@ function normalizeTime(value: number): number {
   if (!Number.isFinite(value) || Number.isNaN(value)) return 0
 
   return value
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 function readApi(): IAonsokuAPI | null {
@@ -100,6 +120,14 @@ function ensureResultOk(
   }
 }
 
+function isRecoverableExclusiveModeError(
+  error: NativeAudioErrorPayload | undefined,
+): boolean {
+  if (!error) return false
+
+  return EXCLUSIVE_RECOVERABLE_ERROR_CODES.has(error.code)
+}
+
 export interface NativePlaybackBackendOptions {
   outputMode: NativeAudioOutputMode
 }
@@ -122,12 +150,131 @@ export class NativePlaybackBackend implements PlaybackBackend {
   private initialized = false
   private listenerAttached = false
   private disposed = false
+  private pendingLoad: Promise<void> | null = null
+  private lastDeviceChangedAt = 0
+  private deviceChangeSequence = 0
 
   private outputMode: NativeAudioOutputMode
 
   constructor(options: NativePlaybackBackendOptions) {
     this.outputMode = options.outputMode
     this.attachEventListener()
+  }
+
+  private async setOutputModeWithFallback(
+    api: IAonsokuAPI,
+    mode: NativeAudioOutputMode,
+  ): Promise<void> {
+    const result =
+      mode === 'wasapi-exclusive'
+        ? await this.setExclusiveModeWithRetry(api)
+        : await api.nativeAudioSetOutputMode(mode)
+    if (result.ok) {
+      this.outputMode = mode
+      return
+    }
+
+    if (
+      mode === 'wasapi-exclusive' &&
+      isRecoverableExclusiveModeError(result.error)
+    ) {
+      logger.warn(
+        '[NativePlaybackBackend] Falling back to wasapi-shared because exclusive mode is unavailable',
+        {
+          code: result.error?.code,
+          message: result.error?.message,
+        },
+      )
+
+      const fallbackResult = await api.nativeAudioSetOutputMode('wasapi-shared')
+      ensureResultOk(
+        fallbackResult,
+        'native-audio-set-output-mode-failed',
+        'Failed to fallback to wasapi-shared output mode.',
+      )
+
+      this.outputMode = 'wasapi-shared'
+      return
+    }
+
+    ensureResultOk(
+      result,
+      'native-audio-set-output-mode-failed',
+      `Failed to set native output mode: ${mode}`,
+    )
+  }
+
+  private async setExclusiveModeWithRetry(
+    api: IAonsokuAPI,
+  ): Promise<NativeAudioCommandResult> {
+    const sinceLastDeviceChange = Date.now() - this.lastDeviceChangedAt
+    if (
+      this.lastDeviceChangedAt > 0 &&
+      sinceLastDeviceChange < EXCLUSIVE_DEVICE_CHANGED_DEBOUNCE_MS
+    ) {
+      await sleep(EXCLUSIVE_DEVICE_CHANGED_DEBOUNCE_MS - sinceLastDeviceChange)
+    }
+
+    const result = await this.trySetExclusiveWithDelays(
+      api,
+      EXCLUSIVE_RETRY_DELAYS_MS,
+    )
+    if (result.ok || !isRecoverableExclusiveModeError(result.error)) {
+      return result
+    }
+
+    const sequenceAtFailure = this.deviceChangeSequence
+    const observedNextDeviceChange = await this.waitForDeviceChange(
+      sequenceAtFailure,
+      EXCLUSIVE_WAIT_FOR_NEXT_DEVICE_CHANGE_MS,
+    )
+
+    if (!observedNextDeviceChange) {
+      return result
+    }
+
+    const afterNextDeviceChange = Date.now() - this.lastDeviceChangedAt
+    if (afterNextDeviceChange < EXCLUSIVE_DEVICE_CHANGED_DEBOUNCE_MS) {
+      await sleep(EXCLUSIVE_DEVICE_CHANGED_DEBOUNCE_MS - afterNextDeviceChange)
+    }
+
+    return this.trySetExclusiveWithDelays(api, EXCLUSIVE_RETRY_DELAYS_MS)
+  }
+
+  private async trySetExclusiveWithDelays(
+    api: IAonsokuAPI,
+    delaysMs: readonly number[],
+  ): Promise<NativeAudioCommandResult> {
+    let result = await api.nativeAudioSetOutputMode('wasapi-exclusive')
+    if (result.ok || !isRecoverableExclusiveModeError(result.error)) {
+      return result
+    }
+
+    for (const delayMs of delaysMs) {
+      await sleep(delayMs)
+      result = await api.nativeAudioSetOutputMode('wasapi-exclusive')
+      if (result.ok || !isRecoverableExclusiveModeError(result.error)) {
+        return result
+      }
+    }
+
+    return result
+  }
+
+  private async waitForDeviceChange(
+    sequence: number,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      if (this.deviceChangeSequence > sequence) {
+        return true
+      }
+      await sleep(DEVICE_CHANGE_POLL_INTERVAL_MS)
+    }
+
+    return false
   }
 
   private attachEventListener(): void {
@@ -180,6 +327,8 @@ export class NativePlaybackBackend implements PlaybackBackend {
     }
 
     if (event.type === 'deviceChanged') {
+      this.lastDeviceChangedAt = Date.now()
+      this.deviceChangeSequence += 1
       logger.info('[NativePlaybackBackend] Device changed event received')
       return
     }
@@ -245,20 +394,17 @@ export class NativePlaybackBackend implements PlaybackBackend {
       }
     }
 
-    const setModeResult = await api.nativeAudioSetOutputMode(this.outputMode)
-    ensureResultOk(
-      setModeResult,
-      'native-audio-set-output-mode-failed',
-      `Failed to set native output mode: ${this.outputMode}`,
-    )
+    await this.setOutputModeWithFallback(api, this.outputMode)
 
     this.initialized = true
   }
 
   async setOutputMode(mode: NativeAudioOutputMode): Promise<void> {
+    const previousMode = this.outputMode
     this.outputMode = mode
 
     if (!this.initialized) return
+    if (previousMode === mode) return
 
     const api = readApi()
     if (!api) {
@@ -268,15 +414,27 @@ export class NativePlaybackBackend implements PlaybackBackend {
       }
     }
 
-    const setModeResult = await api.nativeAudioSetOutputMode(mode)
-    ensureResultOk(
-      setModeResult,
-      'native-audio-set-output-mode-failed',
-      `Failed to set native output mode: ${mode}`,
-    )
+    await this.setOutputModeWithFallback(api, mode)
+  }
+
+  getOutputMode(): NativeAudioOutputMode {
+    return this.outputMode
   }
 
   async load(request: PlaybackLoadRequest): Promise<void> {
+    const loadTask = this.loadInternal(request)
+    this.pendingLoad = loadTask
+
+    try {
+      await loadTask
+    } finally {
+      if (this.pendingLoad === loadTask) {
+        this.pendingLoad = null
+      }
+    }
+  }
+
+  private async loadInternal(request: PlaybackLoadRequest): Promise<void> {
     const api = readApi()
     if (!api) {
       const error = {
@@ -306,6 +464,36 @@ export class NativePlaybackBackend implements PlaybackBackend {
       await this.ensureInitialized()
 
       const result = await api.nativeAudioLoad(request)
+      if (
+        !result.ok &&
+        this.outputMode === 'wasapi-exclusive' &&
+        isRecoverableExclusiveModeError(result.error)
+      ) {
+        logger.warn(
+          '[NativePlaybackBackend] Retrying load with wasapi-shared because exclusive mode load failed',
+          {
+            code: result.error?.code,
+            message: result.error?.message,
+          },
+        )
+
+        const fallbackResult = await api.nativeAudioSetOutputMode('wasapi-shared')
+        ensureResultOk(
+          fallbackResult,
+          'native-audio-set-output-mode-failed',
+          'Failed to fallback to wasapi-shared output mode.',
+        )
+        this.outputMode = 'wasapi-shared'
+
+        const retryResult = await api.nativeAudioLoad(request)
+        ensureResultOk(
+          retryResult,
+          'native-audio-load-failed',
+          'Failed to load native audio source.',
+        )
+        return
+      }
+
       ensureResultOk(
         result,
         'native-audio-load-failed',
@@ -334,6 +522,10 @@ export class NativePlaybackBackend implements PlaybackBackend {
     }
 
     try {
+      if (this.pendingLoad) {
+        await this.pendingLoad
+      }
+
       await this.ensureInitialized()
       const result = await api.nativeAudioPlay()
       ensureResultOk(
@@ -473,5 +665,3 @@ export class NativePlaybackBackend implements PlaybackBackend {
     })
   }
 }
-
-

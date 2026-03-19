@@ -15,6 +15,7 @@ export interface PlaybackLoadRequest {
   autoplay?: boolean
   startAtSeconds?: number
   playbackRate?: number
+  durationSeconds?: number
 }
 
 export interface PlaybackSnapshot {

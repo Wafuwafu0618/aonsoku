@@ -118,6 +118,7 @@ export interface NativeAudioLoadRequest {
   loop?: boolean
   startAtSeconds?: number
   playbackRate?: number
+  durationSeconds?: number
 }
 
 export interface NativeAudioErrorPayload {
