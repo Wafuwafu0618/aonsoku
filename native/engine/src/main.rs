@@ -648,18 +648,6 @@ fn main() -> io::Result<()> {
                                 mode: OutputMode::WasapiShared.as_str().to_string(),
                                 is_default: true,
                             },
-                            NativeAudioDeviceInfo {
-                                id: "default-exclusive".to_string(),
-                                name: "Default Device (Exclusive)".to_string(),
-                                mode: OutputMode::WasapiExclusive.as_str().to_string(),
-                                is_default: true,
-                            },
-                            NativeAudioDeviceInfo {
-                                id: "default-asio".to_string(),
-                                name: "Default Device (ASIO)".to_string(),
-                                mode: OutputMode::Asio.as_str().to_string(),
-                                is_default: true,
-                            },
                         ];
 
                         emit_response_ok(
@@ -685,10 +673,22 @@ fn main() -> io::Result<()> {
                                 }
                             };
 
-                            state.output_mode = mode;
-                            if state.output_mode != OutputMode::WasapiShared {
-                                runtime.stop_sink();
+                            if mode != OutputMode::WasapiShared {
+                                emit_command_error(
+                                    &request.id,
+                                    "unsupported-output-mode",
+                                    "Current build supports only wasapi-shared output mode.",
+                                    Some(
+                                        serde_json::json!({
+                                            "mode": mode.as_str(),
+                                            "supportedModes": ["wasapi-shared"]
+                                        }),
+                                    ),
+                                )?;
+                                continue;
                             }
+
+                            state.output_mode = mode;
 
                             emit_simple_event("deviceChanged", None, None)?;
                             emit_response_ok(&request.id, Some(command_result_ok_value()))?;

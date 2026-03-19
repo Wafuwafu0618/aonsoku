@@ -24,6 +24,7 @@
     "electron:build": "electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "electron-builder --dir --config.win.signAndEditExecutable=false",
+    "win:build:all": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-build-all.ps1",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",

@@ -1,6 +1,4 @@
 import {
-  OVERSAMPLING_ENGINES,
-  OVERSAMPLING_OUTPUT_APIS,
   OversamplingCapability,
   OversamplingSettingsValues,
 } from './types'
@@ -14,11 +12,10 @@ export const DEFAULT_OVERSAMPLING_SETTINGS: OversamplingSettingsValues = {
 }
 
 export const DEFAULT_OVERSAMPLING_CAPABILITY: OversamplingCapability = {
-  supportedOutputApis: [...OVERSAMPLING_OUTPUT_APIS],
-  availableEngines: [...OVERSAMPLING_ENGINES],
+  supportedOutputApis: ['wasapi-shared'],
+  availableEngines: ['cpu'],
   maxTapCountByEngine: {
     cpu: 65536,
-    gpu: 262144,
   },
 }
 
