@@ -95,3 +95,8 @@
 - 「排他モードなのに他アプリ音が聞こえる」問題は、現時点では排他経路が未実装であることと整合。
 - 本当に解決するには M5（WASAPI排他の実装）まで進める必要がある。
 
+## 8. 追記（2026-03-19）
+
+- 4章で列挙した暫定ズレ（Capability表示 / `setOutputMode` / `listDevices`）は修正済み。
+- 実機確認の運用は `docs/wp4-native-output-manual-checklist.md` を使用する。
+
