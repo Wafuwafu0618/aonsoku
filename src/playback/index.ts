@@ -1,3 +1,6 @@
 export * from './backend'
 export * from './backends/internal-backend'
+export * from './backends/native-backend'
+export * from './backends/song-backend-factory'
+export * from './pipeline'
 export * from './session-types'

@@ -1,5 +1,6 @@
 export const PLAYBACK_BACKEND_IDS = [
   'internal',
+  'native',
   'spotify-connect',
   'hqplayer',
   'exclusive',

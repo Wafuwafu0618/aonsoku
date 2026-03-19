@@ -578,7 +578,8 @@
   },
   "warnings": {
     "reload": "再生中の曲があります！\nページを再読み込みしてもよろしいですか？",
-    "songError": "曲を再生できません。サーバーを確認してください！"
+    "songError": "曲を再生できません。サーバーを確認してください！",
+    "oversamplingResolveError": "オーバーサンプリングを適用できません: {{reason}}"
   },
   "update": {
     "dialog": {
@@ -658,6 +659,46 @@
         "defaultGain": {
           "label": "デフォルトゲイン（dB）",
           "info": "このゲインレベルは、ReplayGainメタデータを含まない曲に適用され、一貫した音量を確保します。推奨されるゲイン範囲は-10dBから-1dBです。"
+        }
+      },
+      "oversampling": {
+        "group": "オーバーサンプリング",
+        "description": "高品質フィルタの設定を選択します。",
+        "enabled": "有効",
+        "preset": {
+          "label": "プリセット",
+          "options": {
+            "poly-sinc-short-mp": "poly-sinc-short-mp（低遅延）",
+            "poly-sinc-mp": "poly-sinc-mp（標準）",
+            "poly-sinc-ext2": "poly-sinc-ext2（高品質）"
+          }
+        },
+        "engine": {
+          "label": "エンジン優先",
+          "options": {
+            "auto": "自動",
+            "cpu": "CPU",
+            "gpu": "GPU"
+          }
+        },
+        "outputApi": {
+          "label": "出力API",
+          "options": {
+            "wasapi-shared": "WASAPI 共有",
+            "wasapi-exclusive": "WASAPI 排他",
+            "asio": "ASIO"
+          }
+        },
+        "capability": {
+          "none": "なし",
+          "engines": {
+            "label": "利用可能エンジン",
+            "info": "現在の環境で利用可能なエンジンです。"
+          },
+          "outputApis": {
+            "label": "利用可能出力API",
+            "info": "現在の環境で利用可能な出力APIです。"
+          }
         }
       },
       "lyrics": {

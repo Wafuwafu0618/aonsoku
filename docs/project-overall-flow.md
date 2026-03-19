@@ -158,13 +158,20 @@
 - 音声パイプラインを `decode -> DSP(oversample) -> output` に分離
 - CPU版オーバーサンプラーを先行実装（品質検証の基準）
 - GPU版処理を実装し、CPU版との品質/遅延/負荷を比較
-- 再生中のモード切替（CPU/GPU）と失敗時フォールバックを整備
+- 再生中のモード切替（CPU/GPU）と失敗時の停止/通知/ログを整備
 - UI設定に倍率・フィルタ・処理モードを追加
+
+実装方針（2026-03-19 追記）:
+- 初期実装は `poly-sinc` 系を優先し、命名は HQPlayer 準拠（`poly-sinc-*`）とする
+- 将来拡張に備え、`FilterSpec`（実装）と `PresetSpec`（ユーザー選択）を分離する
+- `Capability`（出力API/CPU/GPU/遅延予算）に基づき Resolver が実行構成を決定する
+- 実行不能時は処理を停止し、理由をUI通知して詳細ログを出力する
+- 詳細は `docs/wp5-oversampling-architecture-plan.md` を参照
 
 完了条件:
 - CPU/GPUの両経路で安定再生できる
 - 再生中に処理モードを切り替えても破綻しない
-- 処理失敗時に自動で安全な経路へフォールバックできる
+- 処理失敗時に理由が明示され、ユーザーが手動で設定を切り替えられる
 - 品質と性能の比較結果（基準値）がドキュメント化されている
 
 ## 6. UI/UX 洗練フェーズ
@@ -258,3 +265,4 @@
 - `docs/foundation-phase-tasklist.md`
 - `docs/foundation-phase-baseline.md`
 - `docs/tool-switch-handoff.md`
+- `docs/wp5-oversampling-architecture-plan.md`

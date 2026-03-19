@@ -1,6 +1,14 @@
 import { EpisodeWithPodcast } from './responses/podcasts'
 import { Radio } from './responses/radios'
 import { ISong } from './responses/song'
+import {
+  OversamplingCapability,
+  OversamplingEnginePreference,
+  OversamplingFailurePolicy,
+  OversamplingOutputApi,
+  OversamplingPresetId,
+  OversamplingSettingsValues,
+} from '@/oversampling/types'
 
 export enum LoopState {
   Off = 0,
@@ -73,6 +81,21 @@ interface IReplayGain {
   actions: IReplayGainActions
 }
 
+interface IOversamplingActions {
+  setEnabled: (value: boolean) => void
+  setPresetId: (value: OversamplingPresetId) => void
+  setEnginePreference: (value: OversamplingEnginePreference) => void
+  setOutputApi: (value: OversamplingOutputApi) => void
+  setOnFailurePolicy: (value: OversamplingFailurePolicy) => void
+  setCapability: (value: OversamplingCapability) => void
+}
+
+interface IOversampling {
+  values: OversamplingSettingsValues
+  capability: OversamplingCapability
+  actions: IOversamplingActions
+}
+
 interface IFullscreen {
   autoFullscreenEnabled: boolean
   setAutoFullscreenEnabled: (value: boolean) => void
@@ -126,6 +149,7 @@ export interface IPlayerSettings {
   fullscreen: IFullscreen
   lyrics: ILyrics
   replayGain: IReplayGain
+  oversampling: IOversampling
   privacy: IPrivacySettings
   colors: IColorsSettings
 }

@@ -1,6 +1,12 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
-import { IAonsokuAPI, IpcChannels, PlayerStateListenerActions } from './types'
+import {
+  IAonsokuAPI,
+  IpcChannels,
+  NativeAudioEvent,
+  NativeAudioOutputMode,
+  PlayerStateListenerActions,
+} from './types'
 
 // Custom APIs for renderer
 const api: IAonsokuAPI = {
@@ -88,6 +94,33 @@ const api: IAonsokuAPI = {
     ipcRenderer.invoke(IpcChannels.ListLocalLibraryFiles, directories),
   readLocalLibraryFile: (path) =>
     ipcRenderer.invoke(IpcChannels.ReadLocalLibraryFile, path),
+  nativeAudioInitialize: () =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioInitialize),
+  nativeAudioListDevices: () =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioListDevices),
+  nativeAudioSetOutputMode: (mode: NativeAudioOutputMode) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioSetOutputMode, mode),
+  nativeAudioLoad: (payload) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioLoad, payload),
+  nativeAudioPlay: () => ipcRenderer.invoke(IpcChannels.NativeAudioPlay),
+  nativeAudioPause: () => ipcRenderer.invoke(IpcChannels.NativeAudioPause),
+  nativeAudioSeek: (positionSeconds) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioSeek, positionSeconds),
+  nativeAudioSetVolume: (volume) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioSetVolume, volume),
+  nativeAudioSetLoop: (loop) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioSetLoop, loop),
+  nativeAudioSetPlaybackRate: (playbackRate) =>
+    ipcRenderer.invoke(IpcChannels.NativeAudioSetPlaybackRate, playbackRate),
+  nativeAudioDispose: () => ipcRenderer.invoke(IpcChannels.NativeAudioDispose),
+  nativeAudioEventListener: (func) => {
+    ipcRenderer.on(IpcChannels.NativeAudioEvent, (_, event: NativeAudioEvent) =>
+      func(event),
+    )
+  },
+  removeNativeAudioEventListener: () => {
+    ipcRenderer.removeAllListeners(IpcChannels.NativeAudioEvent)
+  },
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -38,6 +38,18 @@ export enum IpcChannels {
   PickLocalLibraryDirectory = 'pick-local-library-directory',
   ListLocalLibraryFiles = 'list-local-library-files',
   ReadLocalLibraryFile = 'read-local-library-file',
+  NativeAudioInitialize = 'native-audio-initialize',
+  NativeAudioListDevices = 'native-audio-list-devices',
+  NativeAudioSetOutputMode = 'native-audio-set-output-mode',
+  NativeAudioLoad = 'native-audio-load',
+  NativeAudioPlay = 'native-audio-play',
+  NativeAudioPause = 'native-audio-pause',
+  NativeAudioSeek = 'native-audio-seek',
+  NativeAudioSetVolume = 'native-audio-set-volume',
+  NativeAudioSetLoop = 'native-audio-set-loop',
+  NativeAudioSetPlaybackRate = 'native-audio-set-playback-rate',
+  NativeAudioDispose = 'native-audio-dispose',
+  NativeAudioEvent = 'native-audio-event',
 }
 
 export interface LocalLibraryDirectoryEntry {
@@ -81,6 +93,61 @@ export type PlayerStateListenerActions =
   | 'toggleShuffle'
   | 'toggleRepeat'
 
+export type NativeAudioOutputMode =
+  | 'wasapi-shared'
+  | 'wasapi-exclusive'
+  | 'asio'
+
+export interface NativeAudioInitializeResult {
+  ok: boolean
+  version: string
+  engine: string
+  message?: string
+}
+
+export interface NativeAudioDeviceInfo {
+  id: string
+  name: string
+  mode: NativeAudioOutputMode
+  isDefault: boolean
+}
+
+export interface NativeAudioLoadRequest {
+  src: string
+  autoplay?: boolean
+  loop?: boolean
+  startAtSeconds?: number
+  playbackRate?: number
+}
+
+export interface NativeAudioErrorPayload {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
+export interface NativeAudioCommandResult {
+  ok: boolean
+  error?: NativeAudioErrorPayload
+}
+
+export type NativeAudioEventType =
+  | 'ready'
+  | 'loadedmetadata'
+  | 'timeupdate'
+  | 'play'
+  | 'pause'
+  | 'ended'
+  | 'error'
+  | 'deviceChanged'
+
+export interface NativeAudioEvent {
+  type: NativeAudioEventType
+  currentTimeSeconds?: number
+  durationSeconds?: number
+  error?: NativeAudioErrorPayload
+}
+
 export interface IAonsokuAPI {
   enterFullScreen: () => void
   exitFullScreen: () => void
@@ -118,4 +185,23 @@ export interface IAonsokuAPI {
     directories: string[],
   ) => Promise<LocalLibraryFileEntry[]>
   readLocalLibraryFile: (path: string) => Promise<LocalLibraryFileContent>
+  nativeAudioInitialize: () => Promise<NativeAudioInitializeResult>
+  nativeAudioListDevices: () => Promise<NativeAudioDeviceInfo[]>
+  nativeAudioSetOutputMode: (
+    mode: NativeAudioOutputMode,
+  ) => Promise<NativeAudioCommandResult>
+  nativeAudioLoad: (
+    payload: NativeAudioLoadRequest,
+  ) => Promise<NativeAudioCommandResult>
+  nativeAudioPlay: () => Promise<NativeAudioCommandResult>
+  nativeAudioPause: () => Promise<NativeAudioCommandResult>
+  nativeAudioSeek: (positionSeconds: number) => Promise<NativeAudioCommandResult>
+  nativeAudioSetVolume: (volume: number) => Promise<NativeAudioCommandResult>
+  nativeAudioSetLoop: (loop: boolean) => Promise<NativeAudioCommandResult>
+  nativeAudioSetPlaybackRate: (
+    playbackRate: number,
+  ) => Promise<NativeAudioCommandResult>
+  nativeAudioDispose: () => Promise<NativeAudioCommandResult>
+  nativeAudioEventListener: (func: (event: NativeAudioEvent) => void) => void
+  removeNativeAudioEventListener: () => void
 }

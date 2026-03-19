@@ -1,6 +1,7 @@
 import { electronApp, optimizer, platform } from '@electron-toolkit/utils'
 import { app } from 'electron'
 import { createAppMenu } from './core/menu'
+import { nativeAudioSidecar } from './core/native-audio-sidecar'
 import { initAutoUpdater } from './core/updater'
 import { createWindow, mainWindow } from './window'
 
@@ -65,6 +66,9 @@ if (!instanceLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
+    nativeAudioSidecar.shutdown().catch((error) => {
+      console.error('[NativeAudioSidecar] shutdown failed:', error)
+    })
   })
 
   app.on('window-all-closed', () => {

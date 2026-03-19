@@ -5,17 +5,20 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'react-toastify'
-import { useAudioContext } from '@/app/hooks/use-audio-context'
-import { InternalPlaybackBackend } from '@/playback/backends/internal-backend'
+import { NativeAudioOutputMode } from '@/platform/contracts/desktop-contract'
+import { PlaybackBackend } from '@/playback/backend'
+import { NativePlaybackBackend } from '@/playback/backends/native-backend'
+import { createSongPlaybackBackend } from '@/playback/backends/song-backend-factory'
+import { PlayerAudioPipeline } from '@/playback/pipeline'
 import { PlaybackEvent } from '@/playback/session-types'
 import {
   usePlayerActions,
   usePlayerIsPlaying,
   usePlayerMediaType,
+  useOversamplingState,
   usePlayerVolume,
   useReplayGainActions,
   useReplayGainState,
@@ -28,23 +31,50 @@ type AudioPlayerProps = ComponentPropsWithoutRef<'audio'> & {
   replayGain?: ReplayGainParams
 }
 
+function shouldUseNativeBackendForSong(
+  isSong: boolean,
+  oversamplingEnabled: boolean,
+  outputApi: NativeAudioOutputMode,
+): boolean {
+  if (!isSong || !oversamplingEnabled) return false
+
+  return outputApi === 'wasapi-shared'
+}
+
 export function AudioPlayer({
   audioRef,
   replayGain,
   ...props
 }: AudioPlayerProps) {
   const { t } = useTranslation()
-  const [previousGain, setPreviousGain] = useState(1)
   const { replayGainEnabled, replayGainError } = useReplayGainState()
+  const {
+    enabled: oversamplingEnabled,
+    presetId: oversamplingPresetId,
+    enginePreference: oversamplingEnginePreference,
+    outputApi: oversamplingOutputApi,
+    onFailurePolicy: oversamplingOnFailurePolicy,
+    capability: oversamplingCapability,
+  } = useOversamplingState()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
     usePlayerActions()
   const { setReplayGainEnabled, setReplayGainError } = useReplayGainActions()
   const { volume } = usePlayerVolume()
   const isPlaying = usePlayerIsPlaying()
-  const songBackendRef = useRef<InternalPlaybackBackend | null>(null)
+  const songBackendRef = useRef<PlaybackBackend | null>(null)
+  const audioPipelineRef = useRef<PlayerAudioPipeline>(new PlayerAudioPipeline())
+  const lastOversamplingFailureRef = useRef<string | null>(null)
 
   const { src, loop, autoPlay, ...audioProps } = props
+
+  const nativeOutputMode = oversamplingOutputApi as NativeAudioOutputMode
+  const useNativeSongBackend = shouldUseNativeBackendForSong(
+    isSong,
+    oversamplingEnabled,
+    nativeOutputMode,
+  )
+  const useWebAudioSongPath = isSong && !useNativeSongBackend
 
   const gainValue = useMemo(() => {
     const audioVolume = volume / 100
@@ -57,37 +87,108 @@ export function AudioPlayer({
     return audioVolume * gain
   }, [replayGain, replayGainEnabled, volume])
 
-  const { resumeContext, setupGain } = useAudioContext(audioRef.current)
-
-  const ignoreGain = !isSong || replayGainError
+  useEffect(() => {
+    audioPipelineRef.current.syncAudioTarget({
+      audio: audioRef.current,
+      isSong: useWebAudioSongPath,
+      replayGainError,
+    })
+  }, [audioRef, useWebAudioSongPath, replayGainError])
 
   useEffect(() => {
-    if (ignoreGain || !audioRef.current) return
-
-    if (gainValue === previousGain) return
-
-    setupGain(gainValue, replayGain)
-    setPreviousGain(gainValue)
-  }, [audioRef, ignoreGain, gainValue, previousGain, replayGain, setupGain])
+    audioPipelineRef.current.applyReplayGain({
+      isSong: useWebAudioSongPath,
+      replayGainError,
+      gainValue,
+    })
+  }, [gainValue, useWebAudioSongPath, replayGainError])
 
   useEffect(() => {
     return () => {
+      audioPipelineRef.current.dispose()
       songBackendRef.current?.dispose()
       songBackendRef.current = null
     }
   }, [])
 
   useEffect(() => {
+    if (!useWebAudioSongPath || !oversamplingEnabled) {
+      lastOversamplingFailureRef.current = null
+      return
+    }
+
+    const resolution = audioPipelineRef.current.resolveOversampling(
+      {
+        enabled: oversamplingEnabled,
+        presetId: oversamplingPresetId,
+        enginePreference: oversamplingEnginePreference,
+        outputApi: oversamplingOutputApi,
+        onFailurePolicy: oversamplingOnFailurePolicy,
+      },
+      oversamplingCapability,
+    )
+
+    if (resolution.status !== 'failed') {
+      lastOversamplingFailureRef.current = null
+      return
+    }
+
+    const failureKey = `${resolution.error.code}:${resolution.error.message}`
+
+    if (lastOversamplingFailureRef.current !== failureKey) {
+      lastOversamplingFailureRef.current = failureKey
+      logger.error('[Oversampling] Resolve failed', resolution.error)
+      toast.error(
+        t('warnings.oversamplingResolveError', {
+          reason: resolution.error.message,
+        }),
+      )
+    }
+
+    if (isPlaying) {
+      songBackendRef.current?.pause()
+      setPlayingState(false)
+    }
+  }, [
+    useWebAudioSongPath,
+    isPlaying,
+    oversamplingEnabled,
+    oversamplingPresetId,
+    oversamplingEnginePreference,
+    oversamplingOutputApi,
+    oversamplingOnFailurePolicy,
+    oversamplingCapability,
+    setPlayingState,
+    t,
+  ])
+
+  useEffect(() => {
     const audio = audioRef.current
 
     if (!isSong || !audio || typeof src !== 'string' || src.length === 0) return
 
-    if (!songBackendRef.current) {
-      songBackendRef.current = new InternalPlaybackBackend(audio)
+    const nextBackendId = useNativeSongBackend ? 'native' : 'internal'
+    const currentBackend = songBackendRef.current
+
+    if (!currentBackend || currentBackend.id !== nextBackendId) {
+      currentBackend?.dispose()
+      songBackendRef.current = createSongPlaybackBackend({
+        audio,
+        useNativeBackend: useNativeSongBackend,
+        outputMode: nativeOutputMode,
+      })
     }
 
-    // WP5: 2曲目以降の再生を修正 - src変更時にisPlaying状態に応じてautoplay
-    songBackendRef.current
+    const backend = songBackendRef.current
+    if (!backend) return
+
+    if (backend instanceof NativePlaybackBackend) {
+      backend.setOutputMode(nativeOutputMode).catch((error) => {
+        logger.error('Native output mode update failed', error)
+      })
+    }
+
+    backend
       .load({
         src,
         loop,
@@ -96,7 +197,15 @@ export function AudioPlayer({
       .catch((error) => {
         logger.error('Audio source load failed', error)
       })
-  }, [audioRef, isSong, loop, src, isPlaying])
+  }, [
+    audioRef,
+    isSong,
+    isPlaying,
+    loop,
+    nativeOutputMode,
+    src,
+    useNativeSongBackend,
+  ])
 
   useEffect(() => {
     if (!isSong) return
@@ -195,7 +304,9 @@ export function AudioPlayer({
 
       try {
         if (isPlaying) {
-          await resumeContext()
+          if (useWebAudioSongPath) {
+            await audioPipelineRef.current.resumeIfNeeded()
+          }
           await backend.play()
         } else {
           backend.pause()
@@ -230,7 +341,14 @@ export function AudioPlayer({
     if (isPodcast) {
       handlePodcast()
     }
-  }, [audioRef, handleSongError, isPlaying, isSong, isPodcast, resumeContext])
+  }, [
+    audioRef,
+    handleSongError,
+    isPlaying,
+    isSong,
+    isPodcast,
+    useWebAudioSongPath,
+  ])
 
   useEffect(() => {
     async function handleRadio() {
@@ -255,10 +373,10 @@ export function AudioPlayer({
   }, [handleRadioError, handleSongError, isRadio, isSong])
 
   const crossOrigin = useMemo(() => {
-    if (!isSong || replayGainError) return undefined
+    if (!useWebAudioSongPath || replayGainError) return undefined
 
     return 'anonymous'
-  }, [isSong, replayGainError])
+  }, [replayGainError, useWebAudioSongPath])
 
   return (
     <audio

@@ -16,6 +16,7 @@ import {
   RpcPayload,
   setDiscordRpcActivity,
 } from './discordRpc'
+import { nativeAudioSidecar } from './native-audio-sidecar'
 import { playerState } from './playerState'
 import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
 import { setTaskbarButtons } from './taskbar'
@@ -138,6 +139,11 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   if (!window) return
 
   ipcMain.removeAllListeners()
+
+  nativeAudioSidecar.setEventListener((event) => {
+    if (window.isDestroyed()) return
+    window.webContents.send(IpcChannels.NativeAudioEvent, event)
+  })
 
   ipcMain.on(IpcChannels.ToggleFullscreen, (_, isFullscreen: boolean) => {
     window.setFullScreen(isFullscreen)
@@ -274,4 +280,54 @@ export function setupIpcEvents(window: BrowserWindow | null) {
       createdAt: fileStat.birthtimeMs,
     }
   })
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioInitialize)
+  ipcMain.handle(IpcChannels.NativeAudioInitialize, () =>
+    nativeAudioSidecar.initialize(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioListDevices)
+  ipcMain.handle(IpcChannels.NativeAudioListDevices, () =>
+    nativeAudioSidecar.listDevices(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioSetOutputMode)
+  ipcMain.handle(IpcChannels.NativeAudioSetOutputMode, (_, mode) =>
+    nativeAudioSidecar.setOutputMode(mode),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioLoad)
+  ipcMain.handle(IpcChannels.NativeAudioLoad, (_, payload) =>
+    nativeAudioSidecar.load(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioPlay)
+  ipcMain.handle(IpcChannels.NativeAudioPlay, () => nativeAudioSidecar.play())
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioPause)
+  ipcMain.handle(IpcChannels.NativeAudioPause, () => nativeAudioSidecar.pause())
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioSeek)
+  ipcMain.handle(IpcChannels.NativeAudioSeek, (_, positionSeconds: number) =>
+    nativeAudioSidecar.seek(positionSeconds),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioSetVolume)
+  ipcMain.handle(IpcChannels.NativeAudioSetVolume, (_, volume: number) =>
+    nativeAudioSidecar.setVolume(volume),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioSetLoop)
+  ipcMain.handle(IpcChannels.NativeAudioSetLoop, (_, loop: boolean) =>
+    nativeAudioSidecar.setLoop(loop),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioSetPlaybackRate)
+  ipcMain.handle(
+    IpcChannels.NativeAudioSetPlaybackRate,
+    (_, playbackRate: number) => nativeAudioSidecar.setPlaybackRate(playbackRate),
+  )
+
+  ipcMain.removeHandler(IpcChannels.NativeAudioDispose)
+  ipcMain.handle(IpcChannels.NativeAudioDispose, () => nativeAudioSidecar.dispose())
 }

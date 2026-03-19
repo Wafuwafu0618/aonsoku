@@ -6,6 +6,10 @@ import { immer } from 'zustand/middleware/immer'
 import { shallow } from 'zustand/shallow'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { subsonic } from '@/service/subsonic'
+import {
+  createDefaultOversamplingCapability,
+  createDefaultOversamplingSettings,
+} from '@/oversampling/defaults'
 import { IPlayerContext, ISongList, LoopState } from '@/types/playerContext'
 import { ISong } from '@/types/responses/song'
 import { areSongListsEqual } from '@/utils/compareSongLists'
@@ -158,6 +162,42 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 setReplayGainDefaultGain: (value) => {
                   set((state) => {
                     state.settings.replayGain.values.defaultGain = value
+                  })
+                },
+              },
+            },
+            oversampling: {
+              values: createDefaultOversamplingSettings(),
+              capability: createDefaultOversamplingCapability(),
+              actions: {
+                setEnabled: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.enabled = value
+                  })
+                },
+                setPresetId: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.presetId = value
+                  })
+                },
+                setEnginePreference: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.enginePreference = value
+                  })
+                },
+                setOutputApi: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.outputApi = value
+                  })
+                },
+                setOnFailurePolicy: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.onFailurePolicy = value
+                  })
+                },
+                setCapability: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.capability = value
                   })
                 },
               },
@@ -879,6 +919,10 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                   error: false,
                   defaultGain: -6,
                 }
+                state.settings.oversampling.values =
+                  createDefaultOversamplingSettings()
+                state.settings.oversampling.capability =
+                  createDefaultOversamplingCapability()
               })
             },
             setCurrentSongColor: (value) => {
@@ -1011,6 +1055,15 @@ export const useReplayGainState = () => {
 export const useReplayGainActions = () =>
   usePlayerStore((state) => state.settings.replayGain.actions)
 
+export const useOversamplingState = () =>
+  usePlayerStore((state) => ({
+    ...state.settings.oversampling.values,
+    capability: state.settings.oversampling.capability,
+  }))
+
+export const useOversamplingActions = () =>
+  usePlayerStore((state) => state.settings.oversampling.actions)
+
 export const useFullscreenPlayerSettings = () =>
   usePlayerStore((state) => state.settings.fullscreen)
 
@@ -1126,3 +1179,4 @@ export const usePlayerFullscreen = () =>
     setIsFullscreen: state.actions.setIsFullscreen,
     reset: state.actions.resetFullscreen,
   }))
+
