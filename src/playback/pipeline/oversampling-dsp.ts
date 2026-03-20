@@ -31,6 +31,22 @@ const FILTER_KERNEL_SPECS: Record<string, FilterKernelSpec> = {
     taps: 511,
     cutoff: 0.475,
   },
+  'poly-sinc-lp': {
+    taps: 511,
+    cutoff: 0.476,
+  },
+  'poly-sinc-long-lp': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'poly-sinc-long-ip': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'poly-sinc-gauss': {
+    taps: 767,
+    cutoff: 0.485,
+  },
   'poly-sinc-ext2': {
     taps: 1023,
     cutoff: 0.49,
@@ -92,7 +108,7 @@ export function createOversamplingDspEffectDefinition(
   const kernelSpec = FILTER_KERNEL_SPECS[filterId]
   if (!kernelSpec) return null
 
-  const key = `${resolvedConfig.preset.id}:${resolvedConfig.selectedEngine}:${resolvedConfig.outputApi}`
+  const key = `${resolvedConfig.preset.id}:${resolvedConfig.targetRatePolicy}:${resolvedConfig.selectedEngine}:${resolvedConfig.outputApi}`
 
   return {
     key,

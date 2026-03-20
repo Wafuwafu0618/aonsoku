@@ -15,16 +15,6 @@ const DEFAULT_TRACK_DURATION_SECONDS: f64 = 300.0;
 const TICK_INTERVAL_MS: u64 = 200;
 const EXCLUSIVE_LOCK_FILE_NAME: &str = "aonsoku-native-audio-exclusive.lock";
 
-fn is_exclusive_preview_enabled() -> bool {
-    match std::env::var("AONSOKU_ENABLE_EXCLUSIVE_PREVIEW") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            normalized == "1" || normalized == "true" || normalized == "yes"
-        }
-        Err(_) => false,
-    }
-}
-
 #[derive(Debug, Clone)]
 struct RuntimeError {
     code: &'static str,
@@ -49,8 +39,11 @@ struct ExclusiveProbeError {
 #[cfg(target_os = "windows")]
 mod wasapi_probe {
     use super::ExclusiveProbeError;
-    use rodio::source::UniformSourceIterator;
     use rodio::{Decoder, Sample, Source};
+    use rubato::{
+        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
+        WindowFunction,
+    };
     use std::ffi::c_void;
     use std::io::{BufReader, Cursor};
     use std::sync::mpsc::Receiver;
@@ -65,11 +58,517 @@ mod wasapi_probe {
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
         COINIT_MULTITHREADED,
     };
+    use windows::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    };
 
     #[derive(Debug, Clone, Copy)]
     enum ExclusiveSampleFormat {
         F32,
         I16,
+    }
+
+    const HQ_RESAMPLER_CHUNK_FRAMES: usize = 512;
+    const HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN: f32 = 0.89;
+    const EXCLUSIVE_PENDING_MULTIPLIER_PASSTHROUGH: usize = 3;
+
+    #[derive(Clone, Copy, Debug)]
+    enum HqResamplerProfile {
+        ShortMp,
+        Mp,
+        Lp,
+        LongLp,
+    }
+
+    impl HqResamplerProfile {
+        fn from_filter_id(filter_id: Option<&str>) -> Self {
+            match filter_id {
+                Some("poly-sinc-short-mp") => Self::ShortMp,
+                Some("poly-sinc-mp") => Self::Mp,
+                Some("poly-sinc-lp") => Self::Lp,
+                Some("poly-sinc-long-lp") | Some("poly-sinc-long-ip") => Self::LongLp,
+                _ => Self::Mp,
+            }
+        }
+
+        fn as_label(self) -> &'static str {
+            match self {
+                Self::ShortMp => "poly-sinc-short-mp",
+                Self::Mp => "poly-sinc-mp",
+                Self::Lp => "poly-sinc-lp",
+                Self::LongLp => "poly-sinc-long-lp",
+            }
+        }
+    }
+
+    fn build_hq_resampler_params(
+        profile: HqResamplerProfile,
+        ratio: f64,
+    ) -> SincInterpolationParameters {
+        // Explicit per-profile/per-ratio tiers so presets are audibly more distinct.
+        let (sinc_len, f_cutoff, oversampling_factor): (usize, f32, usize) = match profile {
+            HqResamplerProfile::ShortMp => {
+                if ratio >= 8.0 {
+                    (18, 0.885, 4)
+                } else if ratio >= 4.0 {
+                    (20, 0.890, 5)
+                } else {
+                    (24, 0.900, 6)
+                }
+            }
+            HqResamplerProfile::Mp => {
+                if ratio >= 8.0 {
+                    (32, 0.915, 6)
+                } else if ratio >= 4.0 {
+                    (36, 0.925, 7)
+                } else {
+                    (44, 0.935, 8)
+                }
+            }
+            HqResamplerProfile::Lp => {
+                if ratio >= 8.0 {
+                    (56, 0.945, 8)
+                } else if ratio >= 4.0 {
+                    (72, 0.952, 10)
+                } else {
+                    (88, 0.958, 12)
+                }
+            }
+            HqResamplerProfile::LongLp => {
+                if ratio >= 8.0 {
+                    (96, 0.955, 10)
+                } else if ratio >= 4.0 {
+                    (128, 0.962, 12)
+                } else {
+                    (160, 0.968, 14)
+                }
+            }
+        };
+
+        SincInterpolationParameters {
+            sinc_len,
+            f_cutoff: f_cutoff.clamp(0.82, 0.98),
+            interpolation: SincInterpolationType::Linear,
+            oversampling_factor: oversampling_factor.max(4),
+            window: WindowFunction::BlackmanHarris2,
+        }
+    }
+
+    fn hq_pending_multiplier(profile: HqResamplerProfile, ratio: f64) -> usize {
+        match profile {
+            HqResamplerProfile::ShortMp => {
+                if ratio >= 8.0 {
+                    10
+                } else {
+                    9
+                }
+            }
+            HqResamplerProfile::Mp => {
+                if ratio >= 8.0 {
+                    14
+                } else {
+                    12
+                }
+            }
+            HqResamplerProfile::Lp => {
+                if ratio >= 8.0 {
+                    18
+                } else {
+                    15
+                }
+            }
+            HqResamplerProfile::LongLp => {
+                if ratio >= 8.0 {
+                    24
+                } else {
+                    20
+                }
+            }
+        }
+    }
+
+    fn hq_refill_budget_multiplier(profile: HqResamplerProfile, ratio: f64) -> usize {
+        match profile {
+            HqResamplerProfile::ShortMp => {
+                if ratio >= 8.0 {
+                    4
+                } else {
+                    3
+                }
+            }
+            HqResamplerProfile::Mp => {
+                if ratio >= 8.0 {
+                    5
+                } else {
+                    4
+                }
+            }
+            HqResamplerProfile::Lp => {
+                if ratio >= 8.0 {
+                    7
+                } else {
+                    6
+                }
+            }
+            HqResamplerProfile::LongLp => {
+                if ratio >= 8.0 {
+                    10
+                } else {
+                    8
+                }
+            }
+        }
+    }
+
+    fn map_channel_sample(frame: &[f32], input_channels: usize, output_channel: usize) -> f32 {
+        if input_channels == 0 || frame.is_empty() {
+            return 0.0;
+        }
+
+        if input_channels == 1 {
+            if output_channel <= 1 {
+                return frame[0];
+            }
+            return 0.0;
+        }
+
+        if output_channel < input_channels {
+            return frame[output_channel];
+        }
+
+        0.0
+    }
+
+    struct HqResampledIterator<S>
+    where
+        S: Source + Send,
+        S::Item: Sample,
+    {
+        source: S,
+        input_channels: usize,
+        output_channels: usize,
+        resampler: SincFixedIn<f32>,
+        input_buffer: Vec<Vec<f32>>,
+        frame_buffer: Vec<f32>,
+        output_buffer: Vec<f32>,
+        output_index: usize,
+        source_exhausted: bool,
+        tail_flushed: bool,
+        failed: bool,
+    }
+
+    trait ExclusiveSampleProducer: Send {
+        fn fill_samples(
+            &mut self,
+            output: &mut Vec<f32>,
+            max_samples: usize,
+        ) -> Result<usize, ExclusiveProbeError>;
+    }
+
+    struct IteratorSampleProducer<I>
+    where
+        I: Iterator<Item = f32> + Send,
+    {
+        iterator: I,
+    }
+
+    impl<I> ExclusiveSampleProducer for IteratorSampleProducer<I>
+    where
+        I: Iterator<Item = f32> + Send,
+    {
+        fn fill_samples(
+            &mut self,
+            output: &mut Vec<f32>,
+            max_samples: usize,
+        ) -> Result<usize, ExclusiveProbeError> {
+            if max_samples == 0 {
+                return Ok(0);
+            }
+
+            let initial_len = output.len();
+            for sample in self.iterator.by_ref().take(max_samples) {
+                output.push(sample);
+            }
+            Ok(output.len().saturating_sub(initial_len))
+        }
+    }
+
+    struct HqSampleProducer<S>
+    where
+        S: Source + Send,
+        S::Item: Sample,
+    {
+        iterator: HqResampledIterator<S>,
+    }
+
+    impl<S> ExclusiveSampleProducer for HqSampleProducer<S>
+    where
+        S: Source + Send,
+        S::Item: Sample,
+    {
+        fn fill_samples(
+            &mut self,
+            output: &mut Vec<f32>,
+            max_samples: usize,
+        ) -> Result<usize, ExclusiveProbeError> {
+            self.iterator.fill_samples(output, max_samples)
+        }
+    }
+
+    impl<S> HqResampledIterator<S>
+    where
+        S: Source + Send,
+        S::Item: Sample,
+    {
+        fn new(
+            source: S,
+            output_channels: usize,
+            output_sample_rate: u32,
+            profile: HqResamplerProfile,
+        ) -> Result<Self, ExclusiveProbeError> {
+            let input_channels = source.channels() as usize;
+            let input_sample_rate = source.sample_rate();
+            if input_channels == 0 || input_sample_rate == 0 {
+                return Err(ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message:
+                        "Decoded source produced invalid channel/sample-rate metadata for HQ resampler."
+                            .to_string(),
+                });
+            }
+
+            let ratio = output_sample_rate as f64 / input_sample_rate as f64;
+            let params = build_hq_resampler_params(profile, ratio);
+            eprintln!(
+                "[NativeAudioSidecar] hq-sinc params profile={} ratio={:.3} sinc_len={} cutoff={:.3} osf={}",
+                profile.as_label(),
+                ratio,
+                params.sinc_len,
+                params.f_cutoff,
+                params.oversampling_factor
+            );
+
+            let resampler = SincFixedIn::<f32>::new(
+                ratio,
+                2.0,
+                params,
+                HQ_RESAMPLER_CHUNK_FRAMES,
+                output_channels.max(1),
+            )
+            .map_err(|error| ExclusiveProbeError {
+                code: "exclusive-resampler-init-failed",
+                message: format!("Failed to initialize HQ resampler: {error}"),
+            })?;
+
+            Ok(Self {
+                source,
+                input_channels,
+                output_channels: output_channels.max(1),
+                resampler,
+                input_buffer: vec![
+                    Vec::with_capacity(HQ_RESAMPLER_CHUNK_FRAMES);
+                    output_channels.max(1)
+                ],
+                frame_buffer: vec![0.0_f32; input_channels],
+                output_buffer: Vec::new(),
+                output_index: 0,
+                source_exhausted: false,
+                tail_flushed: false,
+                failed: false,
+            })
+        }
+
+        fn interleave_output(&mut self, processed: &[Vec<f32>]) {
+            self.output_buffer.clear();
+            self.output_index = 0;
+
+            if processed.is_empty() {
+                return;
+            }
+
+            let output_frames = processed[0].len();
+            self.output_buffer
+                .reserve(output_frames.saturating_mul(self.output_channels));
+
+            for frame_index in 0..output_frames {
+                for channel in 0..self.output_channels {
+                    let sample = processed
+                        .get(channel)
+                        .and_then(|ch| ch.get(frame_index))
+                        .copied()
+                        .unwrap_or(0.0);
+                    self.output_buffer.push(sample);
+                }
+            }
+        }
+
+        fn refill(&mut self) -> Result<(), ExclusiveProbeError> {
+            if self.source_exhausted {
+                if self.tail_flushed {
+                    self.output_buffer.clear();
+                    self.output_index = 0;
+                    return Ok(());
+                }
+
+                let processed = self
+                    .resampler
+                    .process_partial(None::<&[Vec<f32>]>, None)
+                    .map_err(|error| ExclusiveProbeError {
+                        code: "exclusive-resampler-process-failed",
+                        message: format!("Failed to flush HQ resampler tail: {error}"),
+                    })?;
+                self.tail_flushed = true;
+                self.interleave_output(&processed);
+                return Ok(());
+            }
+
+            for channel in 0..self.output_channels {
+                self.input_buffer[channel].clear();
+            }
+            let mut frames_read = 0usize;
+
+            'read_frames: while frames_read < HQ_RESAMPLER_CHUNK_FRAMES {
+                for channel in 0..self.input_channels {
+                    let Some(sample) = self.source.next() else {
+                        self.source_exhausted = true;
+                        break 'read_frames;
+                    };
+                    self.frame_buffer[channel] = sample.to_f32();
+                }
+
+                for output_channel in 0..self.output_channels {
+                    self.input_buffer[output_channel].push(map_channel_sample(
+                        &self.frame_buffer,
+                        self.input_channels,
+                        output_channel,
+                    ));
+                }
+                frames_read += 1;
+            }
+
+            if frames_read == 0 {
+                let processed = self
+                    .resampler
+                    .process_partial(None::<&[Vec<f32>]>, None)
+                    .map_err(|error| ExclusiveProbeError {
+                        code: "exclusive-resampler-process-failed",
+                        message: format!("Failed to flush HQ resampler tail: {error}"),
+                    })?;
+                self.tail_flushed = true;
+                self.interleave_output(&processed);
+                return Ok(());
+            }
+
+            if self.source_exhausted {
+                let processed = self
+                    .resampler
+                    .process_partial(Some(&self.input_buffer), None)
+                    .map_err(|error| ExclusiveProbeError {
+                        code: "exclusive-resampler-process-failed",
+                        message: format!("Failed to process final HQ resampler chunk: {error}"),
+                    })?;
+                self.interleave_output(&processed);
+                return Ok(());
+            }
+
+            let processed = self
+                .resampler
+                .process(&self.input_buffer, None)
+                .map_err(|error| ExclusiveProbeError {
+                    code: "exclusive-resampler-process-failed",
+                    message: format!("Failed to process HQ resampler chunk: {error}"),
+                })?;
+            self.interleave_output(&processed);
+            Ok(())
+        }
+
+        fn fill_samples(
+            &mut self,
+            output: &mut Vec<f32>,
+            max_samples: usize,
+        ) -> Result<usize, ExclusiveProbeError> {
+            if self.failed || max_samples == 0 {
+                return Ok(0);
+            }
+
+            let initial_len = output.len();
+            let mut refill_stall_count = 0usize;
+
+            while output.len().saturating_sub(initial_len) < max_samples {
+                if self.output_index >= self.output_buffer.len() {
+                    self.refill()?;
+
+                    if self.output_buffer.is_empty() {
+                        if self.source_exhausted && self.tail_flushed {
+                            break;
+                        }
+
+                        refill_stall_count += 1;
+                        if refill_stall_count >= 8 {
+                            return Err(ExclusiveProbeError {
+                                code: "exclusive-resampler-stalled",
+                                message:
+                                    "HQ resampler produced no output for multiple refill attempts."
+                                        .to_string(),
+                            });
+                        }
+                        continue;
+                    }
+                }
+
+                refill_stall_count = 0;
+                let remaining = max_samples.saturating_sub(output.len().saturating_sub(initial_len));
+                if remaining == 0 {
+                    break;
+                }
+
+                let available = self.output_buffer.len().saturating_sub(self.output_index);
+                if available == 0 {
+                    continue;
+                }
+
+                let copy_len = available.min(remaining);
+                output.extend_from_slice(
+                    &self.output_buffer[self.output_index..self.output_index + copy_len],
+                );
+                self.output_index += copy_len;
+            }
+
+            Ok(output.len().saturating_sub(initial_len))
+        }
+    }
+
+    impl<S> Iterator for HqResampledIterator<S>
+    where
+        S: Source + Send,
+        S::Item: Sample,
+    {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.failed {
+                return None;
+            }
+
+            while self.output_index >= self.output_buffer.len() {
+                if let Err(error) = self.refill() {
+                    self.failed = true;
+                    eprintln!(
+                        "[NativeAudioSidecar] HQ resampler failed: {} ({})",
+                        error.message, error.code
+                    );
+                    return None;
+                }
+
+                if self.output_buffer.is_empty() && self.source_exhausted && self.tail_flushed {
+                    return None;
+                }
+            }
+
+            let sample = self.output_buffer[self.output_index];
+            self.output_index += 1;
+            Some(sample)
+        }
     }
 
     #[derive(Clone, Copy)]
@@ -194,10 +693,10 @@ mod wasapi_probe {
                     ));
                 }
 
-                let periodicity_hns = if minimum_period_hns > 0 {
-                    minimum_period_hns
-                } else if default_period_hns > 0 {
+                let periodicity_hns = if default_period_hns > 0 {
                     default_period_hns
+                } else if minimum_period_hns > 0 {
+                    minimum_period_hns
                 } else {
                     10_000 // 1ms fallback in 100ns units
                 };
@@ -206,7 +705,7 @@ mod wasapi_probe {
                     &audio_client,
                     waveformatex_ptr,
                     "Failed to find supported exclusive format for probe",
-                    None,
+                    &[],
                 ) {
                     Ok(format) => format,
                     Err(error) => {
@@ -314,6 +813,47 @@ mod wasapi_probe {
         })
     }
 
+    fn classify_sample_rate_family(sample_rate: u32) -> Option<u32> {
+        if sample_rate == 0 {
+            return None;
+        }
+        if sample_rate % 44_100 == 0 {
+            return Some(44_100);
+        }
+        if sample_rate % 48_000 == 0 {
+            return Some(48_000);
+        }
+        None
+    }
+
+    fn normalize_target_sample_rate_for_source(
+        source_sample_rate: u32,
+        requested_target_sample_rate: u32,
+    ) -> u32 {
+        if source_sample_rate == 0 || requested_target_sample_rate == 0 {
+            return requested_target_sample_rate;
+        }
+
+        let source_family = classify_sample_rate_family(source_sample_rate);
+        let target_family = classify_sample_rate_family(requested_target_sample_rate);
+
+        match (source_family, target_family) {
+            (Some(source_family), Some(target_family)) if source_family != target_family => {
+                let adjusted = (requested_target_sample_rate as u64)
+                    .saturating_mul(source_family as u64)
+                    .checked_div(target_family as u64)
+                    .unwrap_or(requested_target_sample_rate as u64);
+
+                if adjusted == 0 || adjusted > u32::MAX as u64 {
+                    requested_target_sample_rate
+                } else {
+                    adjusted as u32
+                }
+            }
+            _ => requested_target_sample_rate,
+        }
+    }
+
     fn clone_mix_format_storage(
         waveformatex_ptr: *const Audio::WAVEFORMATEX,
     ) -> ExclusiveWaveFormatStorage {
@@ -336,44 +876,27 @@ mod wasapi_probe {
         audio_client: &IAudioClient,
         waveformatex_ptr: *const Audio::WAVEFORMATEX,
         context: &str,
-        preferred_format: Option<(u16, u32)>,
+        preferred_formats: &[(u16, u32)],
     ) -> Result<ExclusiveFormatSelection, ExclusiveProbeError> {
         unsafe {
             let mix_format = std::ptr::read_unaligned(waveformatex_ptr);
             let mut last_hresult = Audio::AUDCLNT_E_UNSUPPORTED_FORMAT;
 
-            if let Ok(mix_sample_format) = detect_sample_format(waveformatex_ptr) {
-                let mix_storage = clone_mix_format_storage(waveformatex_ptr);
-                let mix_hr = audio_client.IsFormatSupported(
-                    Audio::AUDCLNT_SHAREMODE_EXCLUSIVE,
-                    mix_storage.as_ptr(),
-                    None,
-                );
-                if mix_hr.is_ok() {
-                    return Ok(ExclusiveFormatSelection {
-                        storage: mix_storage,
-                        sample_format: mix_sample_format,
-                    });
+            let mut candidate_layouts = Vec::with_capacity(preferred_formats.len() + 1);
+            for preferred in preferred_formats {
+                if preferred.0 == 0 || preferred.1 == 0 {
+                    continue;
                 }
-                last_hresult = mix_hr;
+                if !candidate_layouts.contains(preferred) {
+                    candidate_layouts.push(*preferred);
+                }
             }
 
-            let mut candidate_layouts = Vec::with_capacity(2);
-            if let Some(preferred) = preferred_format {
-                candidate_layouts.push(preferred);
-            }
-            if candidate_layouts
-                .iter()
-                .all(|candidate| *candidate != (mix_format.nChannels, mix_format.nSamplesPerSec))
-            {
-                candidate_layouts.push((mix_format.nChannels, mix_format.nSamplesPerSec));
-            }
-
-            for (channels, sample_rate) in candidate_layouts {
+            for (channels, sample_rate) in &candidate_layouts {
                 if let Some(float32_format) = build_simple_wave_format(
                     Multimedia::WAVE_FORMAT_IEEE_FLOAT as u16,
-                    channels,
-                    sample_rate,
+                    *channels,
+                    *sample_rate,
                     32,
                 ) {
                     let float_hr = audio_client.IsFormatSupported(
@@ -392,8 +915,67 @@ mod wasapi_probe {
 
                 if let Some(pcm16_format) = build_simple_wave_format(
                     Audio::WAVE_FORMAT_PCM as u16,
-                    channels,
-                    sample_rate,
+                    *channels,
+                    *sample_rate,
+                    16,
+                ) {
+                    let pcm_hr = audio_client.IsFormatSupported(
+                        Audio::AUDCLNT_SHAREMODE_EXCLUSIVE,
+                        &pcm16_format as *const Audio::WAVEFORMATEX,
+                        None,
+                    );
+                    if pcm_hr.is_ok() {
+                        return Ok(ExclusiveFormatSelection {
+                            storage: ExclusiveWaveFormatStorage::Ex(pcm16_format),
+                            sample_format: ExclusiveSampleFormat::I16,
+                        });
+                    }
+                    last_hresult = pcm_hr;
+                }
+            }
+
+            if let Ok(mix_sample_format) = detect_sample_format(waveformatex_ptr) {
+                let mix_storage = clone_mix_format_storage(waveformatex_ptr);
+                let mix_hr = audio_client.IsFormatSupported(
+                    Audio::AUDCLNT_SHAREMODE_EXCLUSIVE,
+                    mix_storage.as_ptr(),
+                    None,
+                );
+                if mix_hr.is_ok() {
+                    return Ok(ExclusiveFormatSelection {
+                        storage: mix_storage,
+                        sample_format: mix_sample_format,
+                    });
+                }
+                last_hresult = mix_hr;
+            }
+
+            let mix_layout = (mix_format.nChannels, mix_format.nSamplesPerSec);
+            if !candidate_layouts.contains(&mix_layout) {
+                if let Some(float32_format) = build_simple_wave_format(
+                    Multimedia::WAVE_FORMAT_IEEE_FLOAT as u16,
+                    mix_layout.0,
+                    mix_layout.1,
+                    32,
+                ) {
+                    let float_hr = audio_client.IsFormatSupported(
+                        Audio::AUDCLNT_SHAREMODE_EXCLUSIVE,
+                        &float32_format as *const Audio::WAVEFORMATEX,
+                        None,
+                    );
+                    if float_hr.is_ok() {
+                        return Ok(ExclusiveFormatSelection {
+                            storage: ExclusiveWaveFormatStorage::Ex(float32_format),
+                            sample_format: ExclusiveSampleFormat::F32,
+                        });
+                    }
+                    last_hresult = float_hr;
+                }
+
+                if let Some(pcm16_format) = build_simple_wave_format(
+                    Audio::WAVE_FORMAT_PCM as u16,
+                    mix_layout.0,
+                    mix_layout.1,
                     16,
                 ) {
                     let pcm_hr = audio_client.IsFormatSupported(
@@ -425,6 +1007,7 @@ mod wasapi_probe {
         channels: usize,
         sample_format: ExclusiveSampleFormat,
         samples: &[f32],
+        pre_gain: f32,
         volume: f32,
     ) {
         let sample_count = frames_to_write * channels;
@@ -433,13 +1016,13 @@ mod wasapi_probe {
             ExclusiveSampleFormat::F32 => unsafe {
                 let output = std::slice::from_raw_parts_mut(buffer_ptr as *mut f32, sample_count);
                 for (index, out_sample) in output.iter_mut().enumerate() {
-                    *out_sample = samples[index] * volume;
+                    *out_sample = samples[index] * pre_gain * volume;
                 }
             },
             ExclusiveSampleFormat::I16 => unsafe {
                 let output = std::slice::from_raw_parts_mut(buffer_ptr as *mut i16, sample_count);
                 for (index, out_sample) in output.iter_mut().enumerate() {
-                    let value = (samples[index] * volume).clamp(-1.0, 1.0);
+                    let value = (samples[index] * pre_gain * volume).clamp(-1.0, 1.0);
                     *out_sample = (value * i16::MAX as f32) as i16;
                 }
             },
@@ -452,6 +1035,8 @@ mod wasapi_probe {
         playback_rate: f64,
         loop_enabled: bool,
         volume: f32,
+        preferred_sample_rate_hz: Option<u32>,
+        oversampling_filter_id: Option<String>,
         stop_receiver: Receiver<()>,
     ) -> Result<bool, ExclusiveProbeError> {
         unsafe {
@@ -471,6 +1056,12 @@ mod wasapi_probe {
             };
 
             let playback_result = (|| -> Result<bool, ExclusiveProbeError> {
+                if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                    eprintln!(
+                        "[NativeAudioSidecar] failed to raise exclusive playback thread priority"
+                    );
+                }
+
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&Audio::MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| {
                         classify_windows_error(
@@ -532,11 +1123,35 @@ mod wasapi_probe {
                     });
                 }
 
+                let mut preferred_formats = Vec::with_capacity(2);
+                if let Some(target_sample_rate) = preferred_sample_rate_hz {
+                    let normalized_target_sample_rate =
+                        normalize_target_sample_rate_for_source(
+                            source_sample_rate,
+                            target_sample_rate,
+                        );
+
+                    eprintln!(
+                        "[NativeAudioSidecar] exclusive target sample rate requested={}Hz",
+                        target_sample_rate
+                    );
+                    if normalized_target_sample_rate != target_sample_rate {
+                        eprintln!(
+                            "[NativeAudioSidecar] exclusive target sample rate adjusted for source family source={}Hz requested={}Hz adjusted={}Hz",
+                            source_sample_rate,
+                            target_sample_rate,
+                            normalized_target_sample_rate
+                        );
+                    }
+                    preferred_formats.push((source_channels, normalized_target_sample_rate));
+                }
+                preferred_formats.push((source_channels, source_sample_rate));
+
                 let selected_format = match select_supported_exclusive_format(
                     &audio_client,
                     waveformatex_ptr,
                     "Failed to find supported exclusive format for playback",
-                    Some((source_channels, source_sample_rate)),
+                    &preferred_formats,
                 ) {
                     Ok(value) => value,
                     Err(error) => {
@@ -583,10 +1198,10 @@ mod wasapi_probe {
                     ));
                 }
 
-                let periodicity_hns = if minimum_period_hns > 0 {
-                    minimum_period_hns
-                } else if default_period_hns > 0 {
+                let periodicity_hns = if default_period_hns > 0 {
                     default_period_hns
+                } else if minimum_period_hns > 0 {
+                    minimum_period_hns
                 } else {
                     10_000
                 };
@@ -630,17 +1245,34 @@ mod wasapi_probe {
 
                 let use_passthrough =
                     source_channels == channels_u16 && source_sample_rate == sample_rate;
+                let hq_profile =
+                    HqResamplerProfile::from_filter_id(oversampling_filter_id.as_deref());
+                let resample_ratio = if source_sample_rate == 0 {
+                    1.0
+                } else {
+                    sample_rate as f64 / source_sample_rate as f64
+                };
+                let resample_pre_gain = if use_passthrough {
+                    1.0
+                } else {
+                    HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN
+                };
                 eprintln!(
-                    "[NativeAudioSidecar] exclusive conversion path: {}",
+                    "[NativeAudioSidecar] exclusive conversion path: {}{}",
                     if use_passthrough {
                         "passthrough"
                     } else {
-                        "uniform-resample"
-                    }
+                        "hq-sinc-resample"
+                    },
+                    if use_passthrough {
+                        String::new()
+                    } else {
+                        format!(" ({})", hq_profile.as_label())
+                    },
                 );
 
-                let mut make_sample_iterator =
-                    || -> Result<Box<dyn Iterator<Item = f32> + Send>, ExclusiveProbeError> {
+                let make_sample_producer =
+                    || -> Result<Box<dyn ExclusiveSampleProducer>, ExclusiveProbeError> {
                         let decoder = Decoder::new(BufReader::new(Cursor::new(audio_data.clone())))
                             .map_err(|error| ExclusiveProbeError {
                                 code: "source-decode-failed",
@@ -663,21 +1295,124 @@ mod wasapi_probe {
                         }
 
                         if use_passthrough {
-                            Ok(Box::new(source.map(|sample| sample.to_f32())))
+                            Ok(Box::new(IteratorSampleProducer {
+                                iterator: source.map(|sample| sample.to_f32()),
+                            }))
                         } else {
-                            Ok(Box::new(UniformSourceIterator::<_, f32>::new(
-                                source,
-                                channels_u16,
-                                sample_rate,
-                            )))
+                            Ok(Box::new(HqSampleProducer {
+                                iterator: HqResampledIterator::new(
+                                    source,
+                                    channels,
+                                    sample_rate,
+                                    hq_profile,
+                                )?,
+                            }))
                         }
                     };
 
-                let mut sample_iterator = make_sample_iterator()?;
-                let mut sample_buffer = Vec::<f32>::with_capacity(
-                    (buffer_frame_count as usize).saturating_mul(channels),
+                let mut sample_producer = make_sample_producer()?;
+                let mut pending_samples = Vec::<f32>::with_capacity(
+                    (buffer_frame_count as usize)
+                        .saturating_mul(channels)
+                        .saturating_mul(2),
                 );
+                let mut pending_start = 0usize;
                 let mut stream_draining = false;
+                let pending_buffer_multiplier = if use_passthrough {
+                    EXCLUSIVE_PENDING_MULTIPLIER_PASSTHROUGH
+                } else {
+                    hq_pending_multiplier(hq_profile, resample_ratio)
+                };
+                let target_pending_samples = (buffer_frame_count as usize)
+                    .saturating_mul(channels)
+                    .saturating_mul(pending_buffer_multiplier);
+                let refill_budget_multiplier = if use_passthrough {
+                    2
+                } else {
+                    hq_refill_budget_multiplier(hq_profile, resample_ratio)
+                };
+                let refill_budget_per_cycle_samples = (buffer_frame_count as usize)
+                    .saturating_mul(channels)
+                    .saturating_mul(refill_budget_multiplier);
+                if !use_passthrough {
+                    eprintln!(
+                        "[NativeAudioSidecar] hq-sinc buffering profile={} ratio={:.3} pending_mul={} refill_mul={}",
+                        hq_profile.as_label(),
+                        resample_ratio,
+                        pending_buffer_multiplier,
+                        refill_budget_multiplier
+                    );
+                }
+
+                // Prime multiple buffers before Start() to reduce startup underrun/noise.
+                let prime_target_samples = target_pending_samples;
+                while !stream_draining
+                    && (pending_samples.len().saturating_sub(pending_start))
+                        < prime_target_samples
+                {
+                    let available_samples = pending_samples.len().saturating_sub(pending_start);
+                    let needed_samples = prime_target_samples.saturating_sub(available_samples);
+                    let added_samples =
+                        sample_producer.fill_samples(&mut pending_samples, needed_samples)?;
+                    if added_samples > 0 {
+                        continue;
+                    }
+
+                    if !loop_enabled {
+                        stream_draining = true;
+                        break;
+                    }
+
+                    sample_producer = make_sample_producer()?;
+                }
+                let initial_available_samples = pending_samples.len().saturating_sub(pending_start);
+                let initial_available_frames = initial_available_samples / channels;
+                if initial_available_frames > 0 {
+                    let initial_frames_to_write = initial_available_frames.min(buffer_frame_count as usize);
+                    let initial_samples_to_write = initial_frames_to_write.saturating_mul(channels);
+
+                    let initial_buffer_ptr =
+                        render_client.GetBuffer(initial_frames_to_write as u32).map_err(|error| {
+                            classify_windows_error(
+                                "exclusive-buffer-get-failed",
+                                "Failed to acquire exclusive render buffer during startup prime",
+                                error,
+                            )
+                        })?;
+
+                    write_render_frames(
+                        initial_buffer_ptr,
+                        initial_frames_to_write,
+                        channels,
+                        sample_format,
+                        &pending_samples
+                            [pending_start..pending_start + initial_samples_to_write],
+                        resample_pre_gain,
+                        volume,
+                    );
+
+                    render_client
+                        .ReleaseBuffer(initial_frames_to_write as u32, 0)
+                        .map_err(|error| {
+                            classify_windows_error(
+                                "exclusive-buffer-release-failed",
+                                "Failed to release exclusive render buffer during startup prime",
+                                error,
+                            )
+                        })?;
+
+                    eprintln!(
+                        "[NativeAudioSidecar] exclusive startup prime wrote {} frames (buffer={} frames)",
+                        initial_frames_to_write,
+                        buffer_frame_count
+                    );
+
+                    pending_start += initial_samples_to_write;
+                    if pending_start >= pending_samples.len() {
+                        pending_samples.clear();
+                        pending_start = 0;
+                    }
+                }
 
                 audio_client.Start().map_err(|error| {
                     classify_windows_error(
@@ -687,6 +1422,7 @@ mod wasapi_probe {
                     )
                 })?;
 
+                let mut consecutive_empty_padding = 0usize;
                 loop {
                     if stop_receiver.try_recv().is_ok() {
                         audio_client.Stop().ok();
@@ -701,8 +1437,21 @@ mod wasapi_probe {
                             error,
                         )
                     })?;
+                    if padding == 0 {
+                        consecutive_empty_padding += 1;
+                        if consecutive_empty_padding == 16 {
+                            eprintln!(
+                                "[NativeAudioSidecar] exclusive render loop observed repeated empty padding (possible underrun)"
+                            );
+                        }
+                    } else {
+                        consecutive_empty_padding = 0;
+                    }
 
-                    if stream_draining && padding == 0 {
+                    if stream_draining
+                        && padding == 0
+                        && pending_start >= pending_samples.len()
+                    {
                         audio_client.Stop().ok();
                         audio_client.Reset().ok();
                         return Ok(true);
@@ -710,20 +1459,31 @@ mod wasapi_probe {
 
                     let writable_frames = buffer_frame_count.saturating_sub(padding) as usize;
                     if writable_frames == 0 {
-                        thread::sleep(Duration::from_millis(2));
+                        thread::yield_now();
                         continue;
                     }
 
-                    if stream_draining {
-                        thread::sleep(Duration::from_millis(2));
+                    if stream_draining && pending_start >= pending_samples.len() {
+                        thread::yield_now();
                         continue;
                     }
 
-                    let max_samples = writable_frames.saturating_mul(channels);
-                    sample_buffer.clear();
-                    while sample_buffer.len() < max_samples {
-                        if let Some(sample) = sample_iterator.next() {
-                            sample_buffer.push(sample);
+                    let writable_samples = writable_frames.saturating_mul(channels);
+                    if writable_samples == 0 {
+                        thread::yield_now();
+                        continue;
+                    }
+
+                    // Refill only what is required for the imminent write first.
+                    while !stream_draining
+                        && (pending_samples.len().saturating_sub(pending_start))
+                            < writable_samples
+                    {
+                        let available_samples = pending_samples.len().saturating_sub(pending_start);
+                        let needed_samples = writable_samples.saturating_sub(available_samples);
+                        let added_samples =
+                            sample_producer.fill_samples(&mut pending_samples, needed_samples)?;
+                        if added_samples > 0 {
                             continue;
                         }
 
@@ -732,30 +1492,51 @@ mod wasapi_probe {
                             break;
                         }
 
-                        sample_iterator = make_sample_iterator()?;
+                        sample_producer = make_sample_producer()?;
                     }
 
-                    let writable_samples = sample_buffer.len() - (sample_buffer.len() % channels);
-                    if writable_samples == 0 {
-                        thread::sleep(Duration::from_millis(2));
+                    let available_samples = pending_samples.len().saturating_sub(pending_start);
+                    let available_frames = available_samples / channels;
+                    if available_frames == 0 {
+                        thread::yield_now();
                         continue;
                     }
-                    let frames_to_write = writable_samples / channels;
+                    let frames_to_write = available_frames.min(writable_frames);
+                    let writable_samples = frames_to_write.saturating_mul(channels);
+                    if writable_samples == 0 {
+                        thread::yield_now();
+                        continue;
+                    }
 
-                    let buffer_ptr = render_client.GetBuffer(frames_to_write as u32).map_err(|error| {
-                        classify_windows_error(
-                            "exclusive-buffer-get-failed",
-                            "Failed to acquire exclusive render buffer",
-                            error,
-                        )
-                    })?;
+                    let buffer_ptr = match render_client.GetBuffer(frames_to_write as u32) {
+                        Ok(ptr) => ptr,
+                        Err(error) => {
+                            let hr = error.code();
+                            // In exclusive mode, available-frame accounting can occasionally race.
+                            // Treat these as transient and retry next loop iteration.
+                            if hr == Audio::AUDCLNT_E_BUFFER_TOO_LARGE
+                                || hr == Audio::AUDCLNT_E_BUFFER_ERROR
+                                || hr == Audio::AUDCLNT_E_BUFFER_OPERATION_PENDING
+                            {
+                                thread::yield_now();
+                                continue;
+                            }
+
+                            return Err(classify_windows_error(
+                                "exclusive-buffer-get-failed",
+                                "Failed to acquire exclusive render buffer",
+                                error,
+                            ));
+                        }
+                    };
 
                     write_render_frames(
                         buffer_ptr,
                         frames_to_write,
                         channels,
                         sample_format,
-                        &sample_buffer[..writable_samples],
+                        &pending_samples[pending_start..pending_start + writable_samples],
+                        resample_pre_gain,
                         volume,
                     );
 
@@ -768,6 +1549,48 @@ mod wasapi_probe {
                                 error,
                             )
                         })?;
+
+                    pending_start += writable_samples;
+                    if pending_start >= pending_samples.len() {
+                        pending_samples.clear();
+                        pending_start = 0;
+                    } else if pending_start >= 16_384
+                        && pending_start >= pending_samples.len() / 2
+                    {
+                        pending_samples.drain(..pending_start);
+                        pending_start = 0;
+                    }
+
+                    // Best-effort top-up after write, with bounded per-cycle work.
+                    let mut refill_budget_remaining = refill_budget_per_cycle_samples;
+                    while !stream_draining
+                        && refill_budget_remaining > 0
+                        && (pending_samples.len().saturating_sub(pending_start))
+                            < target_pending_samples
+                    {
+                        let available_samples = pending_samples.len().saturating_sub(pending_start);
+                        let needed_samples = target_pending_samples
+                            .saturating_sub(available_samples)
+                            .min(refill_budget_remaining);
+                        if needed_samples == 0 {
+                            break;
+                        }
+
+                        let added_samples =
+                            sample_producer.fill_samples(&mut pending_samples, needed_samples)?;
+                        if added_samples > 0 {
+                            refill_budget_remaining =
+                                refill_budget_remaining.saturating_sub(added_samples);
+                            continue;
+                        }
+
+                        if !loop_enabled {
+                            stream_draining = true;
+                            break;
+                        }
+
+                        sample_producer = make_sample_producer()?;
+                    }
                 }
             })();
 
@@ -799,6 +1622,8 @@ mod wasapi_probe {
         _playback_rate: f64,
         _loop_enabled: bool,
         _volume: f32,
+        _preferred_sample_rate_hz: Option<u32>,
+        _oversampling_filter_id: Option<String>,
         _stop_receiver: Receiver<()>,
     ) -> Result<bool, ExclusiveProbeError> {
         Err(ExclusiveProbeError {
@@ -897,6 +1722,10 @@ struct LoadParams {
     playback_rate: Option<f64>,
     #[serde(default)]
     duration_seconds: Option<f64>,
+    #[serde(default)]
+    target_sample_rate_hz: Option<u32>,
+    #[serde(default)]
+    oversampling_filter_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -970,6 +1799,8 @@ struct EngineState {
     playback_rate: f64,
     current_time_seconds: f64,
     duration_seconds: f64,
+    target_sample_rate_hz: Option<u32>,
+    oversampling_filter_id: Option<String>,
     last_tick_instant: Option<Instant>,
 }
 
@@ -985,6 +1816,8 @@ impl Default for EngineState {
             playback_rate: 1.0,
             current_time_seconds: 0.0,
             duration_seconds: 0.0,
+            target_sample_rate_hz: None,
+            oversampling_filter_id: None,
             last_tick_instant: None,
         }
     }
@@ -1006,6 +1839,8 @@ impl EngineState {
         self.playback_rate = 1.0;
         self.current_time_seconds = 0.0;
         self.duration_seconds = 0.0;
+        self.target_sample_rate_hz = None;
+        self.oversampling_filter_id = None;
         self.last_tick_instant = None;
     }
 
@@ -1087,6 +1922,8 @@ struct ExclusivePlaybackParams {
     playback_rate: f64,
     loop_enabled: bool,
     volume: f32,
+    target_sample_rate_hz: Option<u32>,
+    oversampling_filter_id: Option<String>,
 }
 
 struct ExclusivePlaybackSession {
@@ -1143,8 +1980,63 @@ impl Default for AudioRuntime {
 }
 
 impl AudioRuntime {
+    fn try_create_exclusive_lock_file(&self) -> io::Result<File> {
+        OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&self.exclusive_lock_path)
+    }
+
+    fn read_exclusive_lock_pid(&self) -> Option<u32> {
+        let contents = fs::read_to_string(&self.exclusive_lock_path).ok()?;
+        contents.lines().next()?.trim().parse::<u32>().ok()
+    }
+
+    #[cfg(target_os = "windows")]
+    fn is_process_alive(pid: u32) -> bool {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        let process_handle =
+            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) };
+
+        match process_handle {
+            Ok(handle) => {
+                unsafe {
+                    let _ = CloseHandle(handle);
+                }
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn is_process_alive(_pid: u32) -> bool {
+        false
+    }
+
+    fn clear_stale_exclusive_lock_file(&self) -> bool {
+        if !self.exclusive_lock_path.exists() {
+            return false;
+        }
+
+        let should_remove = match self.read_exclusive_lock_pid() {
+            Some(pid) => pid == std::process::id() || !Self::is_process_alive(pid),
+            None => true,
+        };
+
+        if !should_remove {
+            return false;
+        }
+
+        fs::remove_file(&self.exclusive_lock_path).is_ok()
+    }
+
     fn can_offer_exclusive_mode(&self) -> bool {
-        if !cfg!(target_os = "windows") || !is_exclusive_preview_enabled() {
+        if !cfg!(target_os = "windows") {
             return false;
         }
 
@@ -1152,33 +2044,8 @@ impl AudioRuntime {
             return true;
         }
 
-        let lock_available = match OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&self.exclusive_lock_path)
-        {
-            Ok(probe_lock_file) => {
-                drop(probe_lock_file);
-                let _ = fs::remove_file(&self.exclusive_lock_path);
-                true
-            }
-            Err(error) => {
-                if error.kind() != io::ErrorKind::AlreadyExists {
-                    eprintln!(
-                        "[NativeAudioSidecar] failed to probe exclusive lock ({}): {error}",
-                        self.exclusive_lock_path.display()
-                    );
-                }
-                false
-            }
-        };
-
-        if !lock_available {
-            return false;
-        }
-
         // If we already opened output in this process, probing again can fail because
-        // our own shared stream occupies the endpoint. In that case, trust preview gate + lock.
+        // our own shared stream occupies the endpoint. In that case, trust lock state.
         if self.output_handle.is_some() {
             return true;
         }
@@ -1186,17 +2053,20 @@ impl AudioRuntime {
         match wasapi_probe::probe_default_exclusive_open() {
             Ok(()) => true,
             Err(error) => {
-                if error.code != "exclusive-device-busy"
-                    && error.code != "exclusive-not-allowed"
-                    && error.code != "exclusive-format-unsupported"
-                    && error.code != "exclusive-device-unavailable"
+                // Capability is about support, not current availability.
+                // Keep exclusive selectable for transient cases (busy/device state),
+                // and fail only when support is fundamentally unavailable.
+                if error.code == "exclusive-open-unsupported"
+                    || error.code == "exclusive-format-unsupported"
                 {
                     eprintln!(
-                        "[NativeAudioSidecar] exclusive probe failed: {} ({})",
+                        "[NativeAudioSidecar] exclusive capability unavailable: {} ({})",
                         error.message, error.code
                     );
+                    return false;
                 }
-                false
+
+                true
             }
         }
     }
@@ -1208,13 +2078,6 @@ impl AudioRuntime {
                 Ok(())
             }
             OutputMode::WasapiExclusive => {
-                if !is_exclusive_preview_enabled() {
-                    return Err(RuntimeError::new(
-                        "exclusive-preview-disabled",
-                        "WASAPI exclusive preview is disabled. Set AONSOKU_ENABLE_EXCLUSIVE_PREVIEW=1 to enable.",
-                    ));
-                }
-
                 self.acquire_exclusive_lock()?;
 
                 if self.active_output_mode == OutputMode::WasapiExclusive
@@ -1286,29 +2149,34 @@ impl AudioRuntime {
             return Ok(());
         }
 
-        let lock_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&self.exclusive_lock_path)
-            .map_err(|error| {
-                if error.kind() == io::ErrorKind::AlreadyExists {
-                    RuntimeError::new(
-                        "exclusive-device-busy",
-                        format!(
-                            "Exclusive output mode is already in use (lock: {}).",
-                            self.exclusive_lock_path.display()
-                        ),
-                    )
-                } else {
-                    RuntimeError::new(
-                        "exclusive-lock-failed",
-                        format!(
-                            "Failed to create exclusive output lock file ({}): {error}",
-                            self.exclusive_lock_path.display()
-                        ),
-                    )
-                }
-            })?;
+        let mut lock_result = self.try_create_exclusive_lock_file();
+        if let Err(error) = &lock_result {
+            if error.kind() == io::ErrorKind::AlreadyExists
+                && self.clear_stale_exclusive_lock_file()
+            {
+                lock_result = self.try_create_exclusive_lock_file();
+            }
+        }
+
+        let lock_file = lock_result.map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                RuntimeError::new(
+                    "exclusive-device-busy",
+                    format!(
+                        "Exclusive output mode is already in use (lock: {}).",
+                        self.exclusive_lock_path.display()
+                    ),
+                )
+            } else {
+                RuntimeError::new(
+                    "exclusive-lock-failed",
+                    format!(
+                        "Failed to create exclusive output lock file ({}): {error}",
+                        self.exclusive_lock_path.display()
+                    ),
+                )
+            }
+        })?;
 
         let mut lock_file = lock_file;
         let pid = std::process::id();
@@ -1426,6 +2294,8 @@ impl AudioRuntime {
             playback_rate: state.playback_rate.max(0.01),
             loop_enabled: state.loop_enabled,
             volume: state.volume as f32,
+            target_sample_rate_hz: state.target_sample_rate_hz,
+            oversampling_filter_id: state.oversampling_filter_id.clone(),
         });
         self.exclusive_playback_ended = false;
 
@@ -1464,6 +2334,8 @@ impl AudioRuntime {
                 params.playback_rate,
                 params.loop_enabled,
                 params.volume,
+                params.target_sample_rate_hz,
+                params.oversampling_filter_id,
                 stop_receiver,
             );
 
@@ -1874,7 +2746,9 @@ fn main() -> io::Result<()> {
                             },
                         ];
 
-                        if runtime.can_offer_exclusive_mode() {
+                        // Expose exclusive capability on Windows even when temporarily unavailable.
+                        // Runtime availability is validated by setOutputMode/load and can recover.
+                        if cfg!(target_os = "windows") {
                             devices.push(NativeAudioDeviceInfo {
                                 id: "default-exclusive".to_string(),
                                 name: "Default Device (Exclusive)".to_string(),
@@ -1922,22 +2796,13 @@ fn main() -> io::Result<()> {
                             }
 
                             if let Err(error) = runtime.configure_output_mode(mode) {
-                                let details = if error.code == "exclusive-preview-disabled" {
-                                    serde_json::json!({
-                                        "mode": mode.as_str(),
-                                        "requiredEnv": "AONSOKU_ENABLE_EXCLUSIVE_PREVIEW"
-                                    })
-                                } else {
-                                    serde_json::json!({
-                                        "mode": mode.as_str()
-                                    })
-                                };
-
                                 emit_command_error(
                                     &request.id,
                                     error.code,
                                     &error.message,
-                                    Some(details),
+                                    Some(serde_json::json!({
+                                        "mode": mode.as_str()
+                                    })),
                                 )?;
                                 continue;
                             }
@@ -2034,6 +2899,66 @@ fn main() -> io::Result<()> {
                                     }
                                 }
 
+                                if let Some(target_sample_rate_hz) = params.target_sample_rate_hz {
+                                    if target_sample_rate_hz < 8_000 {
+                                        emit_command_error(
+                                            &request.id,
+                                            "invalid-target-sample-rate",
+                                            "targetSampleRateHz must be >= 8000 when provided.",
+                                            Some(
+                                                serde_json::json!({
+                                                    "targetSampleRateHz": target_sample_rate_hz
+                                                }),
+                                            ),
+                                        )?;
+                                        continue;
+                                    }
+                                }
+
+                                let requested_playback_rate =
+                                    params.playback_rate.unwrap_or(1.0);
+                                let requested_loop = params.loop_value;
+                                let requested_start = params.start_at_seconds.unwrap_or(0.0);
+                                let no_explicit_seek = params.start_at_seconds.is_none();
+                                let requested_oversampling_filter_id = params
+                                    .oversampling_filter_id
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|value| !value.is_empty())
+                                    .map(str::to_string);
+
+                                let same_loaded_source = runtime.loaded_audio.is_some()
+                                    && state.source.as_deref() == Some(params.src.as_str())
+                                    && state.target_sample_rate_hz == params.target_sample_rate_hz
+                                    && state.oversampling_filter_id.as_deref()
+                                        == requested_oversampling_filter_id.as_deref()
+                                    && state.loop_enabled == requested_loop
+                                    && (state.playback_rate - requested_playback_rate).abs()
+                                        < f64::EPSILON;
+
+                                if same_loaded_source && no_explicit_seek {
+                                    if params.autoplay {
+                                        if !state.is_playing() {
+                                            if let Err((code, message)) = state.start_playback() {
+                                                emit_command_error(&request.id, code, message, None)?;
+                                                continue;
+                                            }
+                                            runtime.play_sink();
+                                            emit_simple_event("play", None, None)?;
+                                        }
+                                    } else if state.is_playing() {
+                                        state.pause_playback();
+                                        runtime.pause_sink();
+                                        emit_simple_event("pause", None, None)?;
+                                    }
+
+                                    emit_response_ok(
+                                        &request.id,
+                                        Some(command_result_ok_value()),
+                                    )?;
+                                    continue;
+                                }
+
                                 // Stop current playback immediately when switching tracks.
                                 // This avoids leaking previous track audio during load/fetch.
                                 if state.has_source() {
@@ -2108,10 +3033,13 @@ fn main() -> io::Result<()> {
 
                                 state.source = Some(params.src);
                                 state.playback_state = PlaybackState::Ready;
-                                state.loop_enabled = params.loop_value;
-                                state.playback_rate = params.playback_rate.unwrap_or(1.0);
+                                state.loop_enabled = requested_loop;
+                                state.playback_rate = requested_playback_rate;
                                 state.duration_seconds = duration_seconds;
-                                state.set_current_time(params.start_at_seconds.unwrap_or(0.0));
+                                state.target_sample_rate_hz = params.target_sample_rate_hz;
+                                state.oversampling_filter_id =
+                                    requested_oversampling_filter_id;
+                                state.set_current_time(requested_start);
                                 state.last_tick_instant = None;
 
                                 runtime.loaded_audio = Some(LoadedAudio { data: audio_data });
@@ -2164,6 +3092,11 @@ fn main() -> io::Result<()> {
                         }
 
                         if !ensure_output_mode_supported(&state, &request.id)? {
+                            continue;
+                        }
+
+                        if state.is_playing() {
+                            emit_response_ok(&request.id, Some(command_result_ok_value()))?;
                             continue;
                         }
 
@@ -2309,19 +3242,20 @@ fn main() -> io::Result<()> {
                             state.volume = params.volume;
                             if runtime.active_output_mode == OutputMode::WasapiExclusive {
                                 if state.has_source() {
-                                    if let Err(message) = runtime.rebuild_sink_from_state(&state) {
-                                        emit_command_error(
-                                            &request.id,
-                                            "playback-pipeline-failed",
-                                            &message,
-                                            None,
-                                        )?;
-                                        continue;
-                                    }
-
-                                    if state.is_playing() {
-                                        runtime.play_sink();
-                                        state.last_tick_instant = Some(Instant::now());
+                                    if !state.is_playing() {
+                                        if let Err(message) = runtime.rebuild_sink_from_state(&state) {
+                                            emit_command_error(
+                                                &request.id,
+                                                "playback-pipeline-failed",
+                                                &message,
+                                                None,
+                                            )?;
+                                            continue;
+                                        }
+                                    } else if let Some(prepared) =
+                                        runtime.exclusive_prepared_playback.as_mut()
+                                    {
+                                        prepared.volume = state.volume as f32;
                                     }
                                 }
                             } else if let Some(sink) = &runtime.sink {

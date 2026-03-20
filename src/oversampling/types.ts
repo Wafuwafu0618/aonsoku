@@ -1,6 +1,10 @@
 export const OVERSAMPLING_FILTER_IDS = [
   'poly-sinc-short-mp',
   'poly-sinc-mp',
+  'poly-sinc-lp',
+  'poly-sinc-long-lp',
+  'poly-sinc-long-ip',
+  'poly-sinc-gauss',
   'poly-sinc-ext2',
 ] as const
 
@@ -9,6 +13,10 @@ export type OversamplingFilterId = (typeof OVERSAMPLING_FILTER_IDS)[number]
 export const OVERSAMPLING_PRESET_IDS = [
   'poly-sinc-short-mp',
   'poly-sinc-mp',
+  'poly-sinc-lp',
+  'poly-sinc-long-lp',
+  'poly-sinc-long-ip',
+  'poly-sinc-gauss',
   'poly-sinc-ext2',
 ] as const
 
@@ -22,6 +30,12 @@ export const OVERSAMPLING_OUTPUT_APIS = [
 
 export type OversamplingOutputApi = (typeof OVERSAMPLING_OUTPUT_APIS)[number]
 
+// Oversampling quality path targets exclusive/direct output modes only.
+export const OVERSAMPLING_PROCESSING_OUTPUT_APIS = [
+  'wasapi-exclusive',
+  'asio',
+] as const
+
 export const OVERSAMPLING_ENGINES = ['cpu', 'gpu'] as const
 
 export type OversamplingEngine = (typeof OVERSAMPLING_ENGINES)[number]
@@ -33,10 +47,32 @@ export type OversamplingEnginePreference =
 
 export type OversamplingFailurePolicy = 'stop-and-notify'
 
+export const OVERSAMPLING_TARGET_RATE_POLICIES = [
+  'integer-family-max',
+  'fixed-88200',
+  'fixed-96000',
+  'fixed-176400',
+  'fixed-192000',
+  'fixed-352800',
+  'fixed-384000',
+  'fixed-705600',
+  'fixed-768000',
+  'fixed-1411200',
+  'fixed-1536000',
+] as const
+
+export type OversamplingTargetRatePolicy =
+  (typeof OVERSAMPLING_TARGET_RATE_POLICIES)[number]
+
+export type OversamplingFilterPhase =
+  | 'minimum'
+  | 'linear'
+  | 'intermediate'
+
 export interface OversamplingFilterSpec {
   id: OversamplingFilterId
   hqplayerName: string
-  phase: 'minimum'
+  phase: OversamplingFilterPhase
   tapCount: number
   supportedEngines: OversamplingEngine[]
   supportedOutputApis: OversamplingOutputApi[]
@@ -46,7 +82,7 @@ export interface OversamplingPresetSpec {
   id: OversamplingPresetId
   displayName: string
   filterId: OversamplingFilterId
-  targetRatePolicy: 'integer-family-max'
+  targetRatePolicy: OversamplingTargetRatePolicy
   preferredEngine: OversamplingEnginePreference
   onFailurePolicy: OversamplingFailurePolicy
 }
@@ -60,6 +96,7 @@ export interface OversamplingCapability {
 export interface OversamplingSettingsValues {
   enabled: boolean
   presetId: OversamplingPresetId
+  targetRatePolicy: OversamplingTargetRatePolicy
   enginePreference: OversamplingEnginePreference
   outputApi: OversamplingOutputApi
   onFailurePolicy: OversamplingFailurePolicy
@@ -82,6 +119,7 @@ export interface OversamplingResolveFailure {
 export interface ResolvedOversamplingConfig {
   preset: OversamplingPresetSpec
   filter: OversamplingFilterSpec
+  targetRatePolicy: OversamplingTargetRatePolicy
   selectedEngine: OversamplingEngine
   outputApi: OversamplingOutputApi
   onFailurePolicy: OversamplingFailurePolicy

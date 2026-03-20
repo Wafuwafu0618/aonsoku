@@ -27,7 +27,6 @@ const capabilities: PlaybackBackendCapabilities = {
 }
 
 const EXCLUSIVE_RECOVERABLE_ERROR_CODES = new Set([
-  'exclusive-preview-disabled',
   'exclusive-device-busy',
   'exclusive-not-allowed',
   'exclusive-format-unsupported',
@@ -52,6 +51,17 @@ function normalizeTime(value: number): number {
   if (!Number.isFinite(value) || Number.isNaN(value)) return 0
 
   return value
+}
+
+function normalizeSource(value: string): string {
+  try {
+    const baseUrl =
+      typeof window !== 'undefined' ? window.location.href : 'http://localhost'
+
+    return new URL(value, baseUrl).toString()
+  } catch {
+    return value
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -153,6 +163,9 @@ export class NativePlaybackBackend implements PlaybackBackend {
   private pendingLoad: Promise<void> | null = null
   private lastDeviceChangedAt = 0
   private deviceChangeSequence = 0
+  private currentSource: string | null = null
+  private currentTargetSampleRateHz: number | undefined
+  private currentOversamplingFilterId: string | undefined
 
   private outputMode: NativeAudioOutputMode
 
@@ -447,6 +460,49 @@ export class NativePlaybackBackend implements PlaybackBackend {
       throw error
     }
 
+    const normalizedSrc = normalizeSource(request.src)
+    const requestedTargetSampleRateHz =
+      typeof request.targetSampleRateHz === 'number'
+        ? request.targetSampleRateHz
+        : undefined
+    const requestedOversamplingFilterId =
+      typeof request.oversamplingFilterId === 'string' &&
+      request.oversamplingFilterId.length > 0
+        ? request.oversamplingFilterId
+        : undefined
+    const sameSource = this.currentSource === normalizedSrc
+    const sameTargetRate =
+      this.currentTargetSampleRateHz === requestedTargetSampleRateHz
+    const sameOversamplingFilter =
+      this.currentOversamplingFilterId === requestedOversamplingFilterId
+    const sameLoop =
+      typeof request.loop !== 'boolean' || request.loop === this.loop
+    const samePlaybackRate =
+      typeof request.playbackRate !== 'number' ||
+      request.playbackRate === this.playbackRate
+    const hasExplicitSeek =
+      typeof request.startAtSeconds === 'number' &&
+      Number.isFinite(request.startAtSeconds)
+
+    if (
+      sameSource &&
+      sameTargetRate &&
+      sameOversamplingFilter &&
+      sameLoop &&
+      samePlaybackRate &&
+      !hasExplicitSeek
+    ) {
+      if (request.autoplay && !this.isPlaying) {
+        const playResult = await api.nativeAudioPlay()
+        ensureResultOk(
+          playResult,
+          'native-audio-play-failed',
+          'Failed to start native audio playback.',
+        )
+      }
+      return
+    }
+
     this.status = 'loading'
     this.errorMessage = undefined
 
@@ -491,6 +547,9 @@ export class NativePlaybackBackend implements PlaybackBackend {
           'native-audio-load-failed',
           'Failed to load native audio source.',
         )
+        this.currentSource = normalizedSrc
+        this.currentTargetSampleRateHz = requestedTargetSampleRateHz
+        this.currentOversamplingFilterId = requestedOversamplingFilterId
         return
       }
 
@@ -499,12 +558,19 @@ export class NativePlaybackBackend implements PlaybackBackend {
         'native-audio-load-failed',
         'Failed to load native audio source.',
       )
+
+      this.currentSource = normalizedSrc
+      this.currentTargetSampleRateHz = requestedTargetSampleRateHz
+      this.currentOversamplingFilterId = requestedOversamplingFilterId
     } catch (error) {
       const payload = toErrorPayload(
         error,
         'native-audio-load-failed',
         'Failed to load native audio source.',
       )
+      this.currentSource = null
+      this.currentTargetSampleRateHz = undefined
+      this.currentOversamplingFilterId = undefined
       this.status = 'error'
       this.errorMessage = payload.message
       this.emit('error')
@@ -656,6 +722,9 @@ export class NativePlaybackBackend implements PlaybackBackend {
     this.detachEventListener()
     this.listeners.clear()
     this.status = 'idle'
+    this.currentSource = null
+    this.currentTargetSampleRateHz = undefined
+    this.currentOversamplingFilterId = undefined
 
     const api = readApi()
     if (!api) return

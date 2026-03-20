@@ -16,6 +16,8 @@ export interface PlaybackLoadRequest {
   startAtSeconds?: number
   playbackRate?: number
   durationSeconds?: number
+  targetSampleRateHz?: number
+  oversamplingFilterId?: string
 }
 
 export interface PlaybackSnapshot {

@@ -119,6 +119,8 @@ export interface NativeAudioLoadRequest {
   startAtSeconds?: number
   playbackRate?: number
   durationSeconds?: number
+  targetSampleRateHz?: number
+  oversamplingFilterId?: string
 }
 
 export interface NativeAudioErrorPayload {

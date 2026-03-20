@@ -663,13 +663,17 @@
       },
       "oversampling": {
         "group": "オーバーサンプリング",
-        "description": "高品質フィルタの設定を選択します。",
+        "description": "高品質フィルタの設定を選択します（WASAPI共有はOSミキサー経由のため対象外）。",
         "enabled": "有効",
         "preset": {
           "label": "プリセット",
           "options": {
             "poly-sinc-short-mp": "poly-sinc-short-mp（低遅延）",
             "poly-sinc-mp": "poly-sinc-mp（標準）",
+            "poly-sinc-lp": "poly-sinc-lp（線形位相）",
+            "poly-sinc-long-lp": "poly-sinc-long-lp（線形位相・長）",
+            "poly-sinc-long-ip": "poly-sinc-long-ip（中間位相・長）",
+            "poly-sinc-gauss": "poly-sinc-gauss（ガウシアン）",
             "poly-sinc-ext2": "poly-sinc-ext2（高品質）"
           }
         },

@@ -11,8 +11,9 @@ import { toast } from 'react-toastify'
 import { NativeAudioOutputMode } from '@/platform/contracts/desktop-contract'
 import {
   createRuntimeOversamplingCapability,
-  OVERSAMPLING_OUTPUT_APIS,
+  OVERSAMPLING_PROCESSING_OUTPUT_APIS,
   OversamplingCapability,
+  OversamplingTargetRatePolicy,
 } from '@/oversampling'
 import { PlaybackBackend } from '@/playback/backend'
 import { NativePlaybackBackend } from '@/playback/backends/native-backend'
@@ -54,15 +55,62 @@ function describeError(error: unknown): string {
   return String(error)
 }
 
+function hasNativeAudioApi(): boolean {
+  if (typeof window === 'undefined') return false
+
+  const api = (
+    window as Window & { api?: { nativeAudioInitialize?: unknown } }
+  ).api
+  return typeof api?.nativeAudioInitialize === 'function'
+}
+
+function resolveTargetSampleRateHz(
+  policy: OversamplingTargetRatePolicy,
+): number | undefined {
+  switch (policy) {
+    case 'fixed-88200':
+      return 88200
+    case 'fixed-96000':
+      return 96000
+    case 'fixed-176400':
+      return 176400
+    case 'fixed-192000':
+      return 192000
+    case 'fixed-352800':
+      return 352800
+    case 'fixed-384000':
+      return 384000
+    case 'fixed-705600':
+      return 705600
+    case 'fixed-768000':
+      return 768000
+    case 'fixed-1411200':
+      return 1411200
+    case 'fixed-1536000':
+      return 1536000
+    case 'integer-family-max':
+    default:
+      return undefined
+  }
+}
+
 function shouldUseNativeBackendForSong(
   isSong: boolean,
   oversamplingEnabled: boolean,
+  nativeApiAvailable: boolean,
   outputApi: NativeAudioOutputMode,
   outputApiSupported: boolean,
 ): boolean {
-  if (!isSong || !oversamplingEnabled || !outputApiSupported) return false
+  if (
+    !isSong ||
+    !oversamplingEnabled ||
+    !nativeApiAvailable ||
+    !outputApiSupported
+  ) {
+    return false
+  }
 
-  return outputApi === 'wasapi-shared' || outputApi === 'wasapi-exclusive'
+  return outputApi === 'wasapi-exclusive' || outputApi === 'asio'
 }
 
 function areStringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -100,7 +148,7 @@ function areCapabilitiesEqual(
 export function AudioPlayer({
   audioRef,
   replayGain,
-  durationSeconds,
+  durationSeconds: _durationSeconds,
   ...props
 }: AudioPlayerProps) {
   const { t } = useTranslation()
@@ -108,6 +156,7 @@ export function AudioPlayer({
   const {
     enabled: oversamplingEnabled,
     presetId: oversamplingPresetId,
+    targetRatePolicy: oversamplingTargetRatePolicy,
     enginePreference: oversamplingEnginePreference,
     outputApi: oversamplingOutputApi,
     onFailurePolicy: oversamplingOnFailurePolicy,
@@ -116,7 +165,7 @@ export function AudioPlayer({
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
     usePlayerActions()
-  const { setCapability, setEnginePreference, setOutputApi } =
+  const { setCapability, setEnabled, setEnginePreference, setOutputApi } =
     useOversamplingActions()
   const { setReplayGainEnabled, setReplayGainError } = useReplayGainActions()
   const { volume } = usePlayerVolume()
@@ -129,12 +178,21 @@ export function AudioPlayer({
 
   const { src, loop, autoPlay, ...audioProps } = props
 
+  const nativeApiAvailable = hasNativeAudioApi()
+
   const nativeOutputMode = oversamplingOutputApi as NativeAudioOutputMode
+  const oversamplingTargetSampleRateHz = oversamplingEnabled
+    ? resolveTargetSampleRateHz(oversamplingTargetRatePolicy)
+    : undefined
+  const oversamplingFilterId = oversamplingEnabled
+    ? oversamplingPresetId
+    : undefined
   const isSelectedOutputApiSupported =
     oversamplingCapability.supportedOutputApis.includes(oversamplingOutputApi)
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
+    nativeApiAvailable,
     nativeOutputMode,
     isSelectedOutputApiSupported,
   )
@@ -166,8 +224,8 @@ export function AudioPlayer({
         const devices = await nativeApi.nativeAudioListDevices()
         if (cancelled) return
 
-        const supportedOutputApis = OVERSAMPLING_OUTPUT_APIS.filter((mode) =>
-          devices.some((device) => device.mode === mode),
+        const supportedOutputApis = OVERSAMPLING_PROCESSING_OUTPUT_APIS.filter(
+          (mode) => devices.some((device) => device.mode === mode),
         )
         const nextCapability = createRuntimeOversamplingCapability({
           supportedOutputApis,
@@ -179,7 +237,15 @@ export function AudioPlayer({
         }
 
         if (!nextCapability.supportedOutputApis.includes(oversamplingOutputApi)) {
-          setOutputApi(nextCapability.supportedOutputApis[0] ?? 'wasapi-shared')
+          const fallbackOutputApi = nextCapability.supportedOutputApis[0]
+          if (fallbackOutputApi) {
+            setOutputApi(fallbackOutputApi)
+          } else if (oversamplingEnabled) {
+            logger.warn(
+              '[Oversampling] No exclusive/direct output API is available. Disabling oversampling.',
+            )
+            setEnabled(false)
+          }
         }
 
         if (
@@ -202,9 +268,11 @@ export function AudioPlayer({
     }
   }, [
     oversamplingCapability,
+    oversamplingEnabled,
     oversamplingEnginePreference,
     oversamplingOutputApi,
     setCapability,
+    setEnabled,
     setEnginePreference,
     setOutputApi,
   ])
@@ -254,6 +322,7 @@ export function AudioPlayer({
       {
         enabled: oversamplingEnabled,
         presetId: oversamplingPresetId,
+        targetRatePolicy: oversamplingTargetRatePolicy,
         enginePreference: oversamplingEnginePreference,
         outputApi: oversamplingOutputApi,
         onFailurePolicy: oversamplingOnFailurePolicy,
@@ -287,6 +356,7 @@ export function AudioPlayer({
     isPlaying,
     oversamplingEnabled,
     oversamplingPresetId,
+    oversamplingTargetRatePolicy,
     oversamplingEnginePreference,
     oversamplingOutputApi,
     oversamplingOnFailurePolicy,
@@ -372,6 +442,9 @@ export function AudioPlayer({
           const resolvedMode = backend.getOutputMode()
           if (!cancelled && resolvedMode !== nativeOutputMode) {
             setOutputApi(resolvedMode)
+            if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
+              setEnabled(false)
+            }
           }
         }
 
@@ -381,13 +454,17 @@ export function AudioPlayer({
           src,
           loop,
           autoplay: isPlayingRef.current,
-          durationSeconds,
+          targetSampleRateHz: oversamplingTargetSampleRateHz,
+          oversamplingFilterId,
         })
 
         if (backend instanceof NativePlaybackBackend) {
           const resolvedMode = backend.getOutputMode()
           if (!cancelled && resolvedMode !== nativeOutputMode) {
             setOutputApi(resolvedMode)
+            if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
+              setEnabled(false)
+            }
           }
         }
       } catch (error) {
@@ -407,19 +484,26 @@ export function AudioPlayer({
 
           if (nativeOutputMode === 'wasapi-exclusive') {
             setOutputApi('wasapi-shared')
+            if (oversamplingEnabled) {
+              setEnabled(false)
+            }
           }
 
           await backend.load({
             src,
             loop,
             autoplay: isPlayingRef.current,
-            durationSeconds,
+            targetSampleRateHz: oversamplingTargetSampleRateHz,
+            oversamplingFilterId,
           })
 
           if (backend instanceof NativePlaybackBackend) {
             const resolvedMode = backend.getOutputMode()
             if (!cancelled && resolvedMode !== nativeOutputMode) {
               setOutputApi(resolvedMode)
+              if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
+                setEnabled(false)
+              }
             }
           }
         } catch (fallbackError) {
@@ -450,9 +534,12 @@ export function AudioPlayer({
     isSong,
     loop,
     nativeOutputMode,
+    oversamplingEnabled,
+    oversamplingFilterId,
+    oversamplingTargetSampleRateHz,
+    setEnabled,
     setOutputApi,
     src,
-    durationSeconds,
     useNativeSongBackend,
   ])
   useEffect(() => {
