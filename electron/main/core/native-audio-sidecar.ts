@@ -58,7 +58,16 @@ const SIDECAR_BINARY_NAME =
     ? 'aonsoku-native-audio-engine.exe'
     : 'aonsoku-native-audio-engine'
 
-const SIDECAR_REQUEST_TIMEOUT_MS = 5000
+const SIDECAR_REQUEST_TIMEOUT_MS = 10000
+const SIDECAR_LOAD_REQUEST_TIMEOUT_MS = 30000
+const SIDECAR_INITIALIZE_REQUEST_TIMEOUT_MS = 15000
+
+function resolveCommandTimeoutMs(command: SidecarCommand): number {
+  if (command === 'load') return SIDECAR_LOAD_REQUEST_TIMEOUT_MS
+  if (command === 'initialize') return SIDECAR_INITIALIZE_REQUEST_TIMEOUT_MS
+
+  return SIDECAR_REQUEST_TIMEOUT_MS
+}
 
 function toNativeCommandError(
   error: unknown,
@@ -390,6 +399,8 @@ class NativeAudioSidecarClient {
 
     const serialized = JSON.stringify(payload)
 
+    const timeoutMs = resolveCommandTimeoutMs(command)
+
     return await new Promise<T>((resolve, reject) => {
       const timeoutRef = setTimeout(() => {
         this.pendingRequests.delete(requestId)
@@ -397,10 +408,10 @@ class NativeAudioSidecarClient {
           code: 'sidecar-timeout',
           message: `Sidecar command timed out: ${command}`,
           details: {
-            timeoutMs: SIDECAR_REQUEST_TIMEOUT_MS,
+            timeoutMs,
           },
         })
-      }, SIDECAR_REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
 
       this.pendingRequests.set(requestId, {
         resolve: (value) => resolve(value as T),
@@ -427,4 +438,3 @@ class NativeAudioSidecarClient {
 }
 
 export const nativeAudioSidecar = new NativeAudioSidecarClient()
-

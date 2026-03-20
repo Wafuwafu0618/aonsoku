@@ -8,6 +8,7 @@ import {
   OversamplingOutputApi,
   OversamplingPresetId,
   OversamplingSettingsValues,
+  OversamplingTargetRatePolicy,
 } from '@/oversampling/types'
 
 export enum LoopState {
@@ -84,6 +85,7 @@ interface IReplayGain {
 interface IOversamplingActions {
   setEnabled: (value: boolean) => void
   setPresetId: (value: OversamplingPresetId) => void
+  setTargetRatePolicy: (value: OversamplingTargetRatePolicy) => void
   setEnginePreference: (value: OversamplingEnginePreference) => void
   setOutputApi: (value: OversamplingOutputApi) => void
   setOnFailurePolicy: (value: OversamplingFailurePolicy) => void

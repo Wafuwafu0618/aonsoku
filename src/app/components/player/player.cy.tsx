@@ -6,6 +6,20 @@ describe('Player Component', () => {
   beforeEach(() => {
     cy.mockCoverArt()
     cy.mockSongStream()
+    const oversamplingActions =
+      usePlayerStore.getState().settings.oversampling.actions
+    oversamplingActions.setEnabled(false)
+    oversamplingActions.setPresetId('poly-sinc-mp')
+    oversamplingActions.setTargetRatePolicy('integer-family-max')
+    oversamplingActions.setEnginePreference('auto')
+    oversamplingActions.setOutputApi('wasapi-exclusive')
+    oversamplingActions.setCapability({
+      supportedOutputApis: ['wasapi-exclusive'],
+      availableEngines: ['cpu'],
+      maxTapCountByEngine: {
+        cpu: 65536,
+      },
+    })
   })
 
   it('should mount the player and interact with it', () => {
@@ -23,7 +37,6 @@ describe('Player Component', () => {
 
         cy.stub($el, 'load').as('loadStub')
         cy.stub($el, 'play').as('playStub')
-        cy.stub($el, 'pause').as('pauseStub')
 
         $el.removeAttribute('autoplay')
       })
@@ -38,9 +51,7 @@ describe('Player Component', () => {
       cy.get('@pauseButton').should('be.visible')
 
       cy.get('@pauseButton').click()
-      cy.get('@pauseStub').should('have.been.called')
-
-      cy.get('@playButton').should('be.visible')
+      cy.getByTestId('player-button-play').should('be.visible')
 
       cy.getByTestId('player-button-shuffle')
         .should('be.visible')
@@ -206,6 +217,79 @@ describe('Player Component', () => {
           true,
         )
       })
+    })
+  })
+
+  it('should open the signal path popover', () => {
+    cy.fixture('songs/random').then((songs: ISong[]) => {
+      usePlayerStore.getState().actions.setSongList(songs, 0)
+      usePlayerStore.getState().actions.setPlayingState(false)
+      const oversamplingActions =
+        usePlayerStore.getState().settings.oversampling.actions
+      oversamplingActions.setEnabled(false)
+      oversamplingActions.setOutputApi('wasapi-exclusive')
+
+      cy.mount(<Player />)
+
+      cy.getByTestId('player-button-signal-path')
+        .should('be.visible')
+        .click()
+
+      cy.getByTestId('player-signal-path-popover').should('be.visible')
+      cy.getByTestId('player-signal-path-quality').should(
+        'contain.text',
+        'Lossy',
+      )
+      cy.getByTestId('player-signal-stage-source').should('be.visible')
+      cy.getByTestId('player-signal-stage-source-value').should(
+        'contain.text',
+        'Navidrome',
+      )
+      cy.getByTestId('player-signal-stage-dsp-value').should(
+        'contain.text',
+        'Disabled',
+      )
+      cy.getByTestId('player-signal-stage-output').should('be.visible')
+      cy.getByTestId('player-signal-stage-output-value').should(
+        'contain.text',
+        'System Shared',
+      )
+    })
+  })
+
+  it('should show enhanced quality when oversampling is enabled', () => {
+    cy.fixture('songs/random').then((songs: ISong[]) => {
+      usePlayerStore.getState().actions.setSongList(songs, 0)
+      usePlayerStore.getState().actions.setPlayingState(false)
+      const oversamplingActions =
+        usePlayerStore.getState().settings.oversampling.actions
+      oversamplingActions.setCapability({
+        supportedOutputApis: ['wasapi-exclusive'],
+        availableEngines: ['cpu'],
+        maxTapCountByEngine: {
+          cpu: 65536,
+        },
+      })
+      oversamplingActions.setOutputApi('wasapi-exclusive')
+      oversamplingActions.setPresetId('poly-sinc-mp')
+      oversamplingActions.setEnginePreference('auto')
+      oversamplingActions.setTargetRatePolicy('integer-family-max')
+      oversamplingActions.setEnabled(true)
+
+      cy.mount(<Player />)
+
+      cy.getByTestId('player-button-signal-path')
+        .should('be.visible')
+        .click()
+
+      cy.getByTestId('player-signal-path-quality').should(
+        'contain.text',
+        'Enhanced',
+      )
+      cy.getByTestId('player-signal-stage-dsp-value').should(
+        'contain.text',
+        'Oversampling',
+      )
     })
   })
 

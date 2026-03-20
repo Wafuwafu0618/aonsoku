@@ -180,6 +180,11 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                     state.settings.oversampling.values.presetId = value
                   })
                 },
+                setTargetRatePolicy: (value) => {
+                  set((state) => {
+                    state.settings.oversampling.values.targetRatePolicy = value
+                  })
+                },
                 setEnginePreference: (value) => {
                   set((state) => {
                     state.settings.oversampling.values.enginePreference = value

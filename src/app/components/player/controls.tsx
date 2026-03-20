@@ -34,6 +34,7 @@ import { EpisodeWithPodcast } from '@/types/responses/podcasts'
 import { Radio } from '@/types/responses/radios'
 import { ISong } from '@/types/responses/song'
 import { manageMediaSession } from '@/utils/setMediaSession'
+import { PlayerSignalPathButton } from './signal-path-button'
 
 interface PlayerControlsProps {
   song: ISong
@@ -115,6 +116,8 @@ export function PlayerControls({
 
   return (
     <div className="flex w-full gap-1 justify-center items-center mb-1">
+      {isSong && <PlayerSignalPathButton disabled={!song} />}
+
       {isSong && (
         <PlayerButton
           className={clsx(isShuffleActive && 'player-button-active')}

@@ -142,6 +142,12 @@
 - 排他モードで安定再生できる
 - 通常モードとの切替が破綻しない
 
+進捗メモ（2026-03-19）:
+- `wasapi-shared` の安定経路は実装済み
+- `wasapi-exclusive` は preview gate（`AONSOKU_ENABLE_EXCLUSIVE_PREVIEW=1`）付きで受け付け開始
+- sidecar 間の同時利用防止ロックは実装済み
+- ただし OS ネイティブの WASAPI exclusive open は未実装（M5継続）
+
 ## 5. Aonsoku内蔵オーバーサンプラー/GPUフェーズ
 
 狙い:

@@ -435,6 +435,35 @@
       "volume": {
         "mute": "ミュート",
         "unmute": "ミュート解除"
+      },
+      "signalPath": "シグナルパスを表示"
+    },
+    "signalPath": {
+      "title": "Signal Path: {{quality}}",
+      "subtitle": "再生パイプラインの各ステージを表示します",
+      "quality": {
+        "lossless": "Lossless",
+        "enhanced": "Enhanced",
+        "lossy": "Lossy",
+        "warning": "Warning"
+      },
+      "stages": {
+        "source": {
+          "title": "Source",
+          "description": "TIDAL FLAC 44.1kHz 16bit 2ch"
+        },
+        "engine": {
+          "title": "Engine",
+          "description": "Native Audio Engine"
+        },
+        "dsp": {
+          "title": "DSP",
+          "description": "Oversampling (HQ Sinc)"
+        },
+        "output": {
+          "title": "Output",
+          "description": "WASAPI Exclusive"
+        }
       }
     }
   },

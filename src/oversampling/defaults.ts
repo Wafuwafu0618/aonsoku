@@ -6,13 +6,14 @@ import {
 export const DEFAULT_OVERSAMPLING_SETTINGS: OversamplingSettingsValues = {
   enabled: false,
   presetId: 'poly-sinc-mp',
+  targetRatePolicy: 'integer-family-max',
   enginePreference: 'auto',
-  outputApi: 'wasapi-shared',
+  outputApi: 'wasapi-exclusive',
   onFailurePolicy: 'stop-and-notify',
 }
 
 export const DEFAULT_OVERSAMPLING_CAPABILITY: OversamplingCapability = {
-  supportedOutputApis: ['wasapi-shared'],
+  supportedOutputApis: ['wasapi-exclusive'],
   availableEngines: ['cpu'],
   maxTapCountByEngine: {
     cpu: 65536,

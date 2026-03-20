@@ -1,13 +1,14 @@
 # WP4 Native Output 手動確認チェックリスト
 
 更新日: 2026-03-19
-対象: WP4 Native Output（暫定: `wasapi-shared` のみ）
+対象: WP4/M5 Native Output（shared + exclusive preview）
 
 ## 0. 前提
 
 - [ ] Windows 環境で確認する
 - [ ] 最新コードを取得済み
 - [ ] `npm run win:build:all` が通る
+- [ ] 排他プレビュー確認時は `AONSOKU_ENABLE_EXCLUSIVE_PREVIEW=1` を設定して起動する
 
 ## 1. ビルド確認
 
@@ -21,7 +22,8 @@
 
 - [ ] Settings > Audio > Oversampling を開く
 - [ ] Capability の Engine 表示が `CPU` のみ
-- [ ] Capability の Output API 表示が `WASAPI 共有` のみ
+- [ ] プレビュー未設定時は Output API 表示が `WASAPI 共有` のみ
+- [ ] プレビュー設定時は Output API に `WASAPI 排他` も表示される
 
 ## 3. 再生確認（shared）
 
@@ -30,9 +32,11 @@
 - [ ] Song 再生開始でエラーなく再生できる
 - [ ] 再生中の Pause/Resume/Seek が動く
 
-## 4. 未実装モード確認（exclusive/asio）
+## 4. モード確認（exclusive/asio）
 
-- [ ] Output API を `WASAPI 排他` に変更したとき、即時にエラー扱いになる
+- [ ] プレビュー未設定時に `WASAPI 排他` は選択不可、または即時エラーになる
+- [ ] プレビュー設定時に `WASAPI 排他` は選択できる
+- [ ] 排他利用中に別プロセスから排他設定を試すと `exclusive-device-busy` になる
 - [ ] Output API を `ASIO` に変更したとき、即時にエラー扱いになる
 - [ ] 「再生開始後に曖昧に失敗する」のではなく、モード設定時点で失敗が分かる
 

@@ -10,7 +10,7 @@
 // ***********************************************
 //
 //
-import i18n from '@/i18n'
+import i18n from '../../src/i18n'
 
 Cypress.Commands.add('getByTestId', (query, options) => {
   return cy.get(`[data-testid="${query}"]`, options || undefined)

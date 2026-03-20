@@ -99,4 +99,8 @@
 
 - 4章で列挙した暫定ズレ（Capability表示 / `setOutputMode` / `listDevices`）は修正済み。
 - 実機確認の運用は `docs/wp4-native-output-manual-checklist.md` を使用する。
+- M5着手として、exclusive preview の土台を追加済み（`AONSOKU_ENABLE_EXCLUSIVE_PREVIEW=1` 時のみ有効）。
+- 追加で `setOutputMode(wasapi-exclusive)` 時に WASAPI exclusive open probe を実装し、失敗理由を詳細コードで返すようにした。
+- さらに `native/engine` に WASAPI exclusive render path（`IAudioRenderClient`）のMVPを実装し、exclusive時の実再生経路を追加した。
+- ただし現時点はMVPで、フォーマット対応や失敗時イベント伝搬、長時間安定性検証は継続タスク。
 

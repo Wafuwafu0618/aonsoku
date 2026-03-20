@@ -149,6 +149,7 @@ export const resolveOversamplingConfig = (
     value: {
       preset,
       filter,
+      targetRatePolicy: settings.targetRatePolicy,
       selectedEngine: tapCompatibleEngines[0],
       outputApi: settings.outputApi,
       onFailurePolicy: settings.onFailurePolicy,
