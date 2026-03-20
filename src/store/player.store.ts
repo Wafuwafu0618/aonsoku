@@ -18,6 +18,7 @@ import {
   getCurrentAudioElement,
   setCurrentAudioElement,
 } from './audio-element-registry'
+import { getCurrentSongSeekHandler } from './song-seek-registry'
 import { idbStorage } from './idb'
 import {
   runHandleSongEnded,
@@ -629,10 +630,13 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               })
             },
             seekTo: (progress) => {
-              const audioPlayerRef = getCurrentAudioElement()
               const { mediaType } = usePlaybackSessionStore.getState()
+              const audioPlayerRef = getCurrentAudioElement()
+              const songSeekHandler = getCurrentSongSeekHandler()
 
-              if (audioPlayerRef) {
+              if (mediaType === 'song' && songSeekHandler) {
+                songSeekHandler(progress)
+              } else if (audioPlayerRef) {
                 audioPlayerRef.currentTime = progress
               }
 

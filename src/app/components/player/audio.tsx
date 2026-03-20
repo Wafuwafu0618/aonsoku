@@ -30,6 +30,7 @@ import {
   useReplayGainActions,
   useReplayGainState,
 } from '@/store/player.store'
+import { setCurrentSongSeekHandler } from '@/store/song-seek-registry'
 import { logger } from '@/utils/logger'
 import { calculateReplayGain, ReplayGainParams } from '@/utils/replayGain'
 
@@ -306,11 +307,27 @@ export function AudioPlayer({
 
   useEffect(() => {
     return () => {
+      setCurrentSongSeekHandler(null)
       audioPipelineRef.current.dispose()
       songBackendRef.current?.dispose()
       songBackendRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!isSong) {
+      setCurrentSongSeekHandler(null)
+      return
+    }
+
+    setCurrentSongSeekHandler((positionSeconds) => {
+      songBackendRef.current?.seek(positionSeconds)
+    })
+
+    return () => {
+      setCurrentSongSeekHandler(null)
+    }
+  }, [isSong])
 
   useEffect(() => {
     if (!useWebAudioSongPath || !oversamplingEnabled) {
