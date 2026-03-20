@@ -1,0 +1,2 @@
+{"kind":"request","id":1,"command":"initialize"}
+{"kind":"request","id":2,"command":"listDevices"}

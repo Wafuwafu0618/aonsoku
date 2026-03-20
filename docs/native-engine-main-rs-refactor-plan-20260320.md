@@ -2,6 +2,7 @@
 
 最終更新: 2026-03-20
 対象: `native/engine/src/main.rs`
+関連: `docs/native-engine-r0-baseline-checklist-20260320.md`
 
 ## 1. 目的
 
@@ -79,6 +80,7 @@ native/engine/src/
 
 - 主要経路の手動チェック項目を先に固定
 - ログ採取手順を決める（load/play/seek/pause/end/error）
+- 実施シートは `docs/native-engine-r0-baseline-checklist-20260320.md` を正本とする
 
 完了条件:
 
@@ -161,4 +163,3 @@ native/engine/src/
 
 - decoder 差し替え対象: `runtime/source_loader.rs` + decode adapter
 - output 差し替え対象: `runtime/shared_output.rs`（必要に応じて exclusive も）
-
