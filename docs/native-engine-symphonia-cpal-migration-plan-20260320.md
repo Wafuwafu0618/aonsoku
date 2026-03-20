@@ -27,6 +27,10 @@
   - exclusive 再生ワーカーの入力を `audio_data`（rodio decode）から `DecodedPcmData` 由来 `SharedPcmTrack` へ切替
   - WASAPI worker / HQ sinc resampler（rubato）は維持し、decode 起点のみ `decoder_backend.decode_pcm` へ移行
   - runtime に exclusive 用 decode キャッシュを追加し、`load`/`clear` で破棄する運用へ統一
+- M5: 実装着手（2026-03-21）
+  - `decoder` を symphonia 専用化し、`DecodedStream` / rodio backend を削除
+  - shared 出力を cpal 専用化し、runtime の rodio sink/output 経路を削除
+  - exclusive worker 内の `skip_duration/speed` 相当を内部PCMソースへ置換し、rodio 補助型依存を削減
 
 ## 1. 目的
 
@@ -177,8 +181,7 @@ source fetch/read
 ## 11. ロールバック/セーフティ
 
 - feature flag 導入を推奨:
-  - `AONSOKU_NATIVE_DECODER=rodio|symphonia`
-  - `AONSOKU_NATIVE_SHARED_OUTPUT=rodio|cpal`
+  - `AONSOKU_NATIVE_DECODER=symphonia`
 - デフォルトは段階ごとに保守的に切替
 - 不具合時は flag で即復旧できる状態を維持
 

@@ -6,7 +6,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use rodio::{OutputStream, OutputStreamHandle, Sink};
 use url::Url;
 
 use crate::audio::{
@@ -14,48 +13,12 @@ use crate::audio::{
     SharedPcmTrack,
 };
 use crate::decoder::{
-    default_decoder_backend, DecodePlaybackOptions, DecodedPcmData, DecodedSourceInfo,
-    DecoderBackend,
+    default_decoder_backend, DecodedPcmData, DecodedSourceInfo, DecoderBackend,
 };
 use crate::engine::{EngineState, OutputMode};
 use crate::error::RuntimeError;
 
 const EXCLUSIVE_LOCK_FILE_NAME: &str = "aonsoku-native-audio-exclusive.lock";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SharedOutputBackend {
-    Rodio,
-    Cpal,
-}
-
-impl SharedOutputBackend {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Rodio => "rodio",
-            Self::Cpal => "cpal",
-        }
-    }
-}
-
-fn default_shared_output_backend() -> SharedOutputBackend {
-    let backend_name = std::env::var("AONSOKU_NATIVE_SHARED_OUTPUT")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "cpal".to_string());
-
-    match backend_name.as_str() {
-        "rodio" => SharedOutputBackend::Rodio,
-        "cpal" => SharedOutputBackend::Cpal,
-        unsupported => {
-            eprintln!(
-                "[NativeAudioSidecar][M3] unsupported shared output backend '{}', fallback to cpal",
-                unsupported
-            );
-            SharedOutputBackend::Cpal
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct LoadedAudio {
@@ -64,7 +27,7 @@ pub struct LoadedAudio {
 
 #[derive(Clone)]
 pub struct ExclusivePlaybackParams {
-    pub track: SharedPcmTrack,
+    pub audio_data: Arc<[u8]>,
     pub start_at_seconds: f64,
     pub playback_rate: f64,
     pub loop_enabled: bool,
@@ -96,14 +59,10 @@ impl ExclusivePlaybackSession {
 
 pub struct AudioRuntime {
     pub decoder_backend: Arc<dyn DecoderBackend>,
-    pub shared_output_backend: SharedOutputBackend,
-    pub output_stream: Option<OutputStream>,
-    pub output_handle: Option<OutputStreamHandle>,
-    pub sink: Option<Sink>,
     pub shared_cpal_output: Option<SharedCpalOutput>,
     pub loaded_audio: Option<LoadedAudio>,
+    pub loaded_source_info: Option<DecodedSourceInfo>,
     pub shared_decoded_pcm: Option<DecodedPcmData>,
-    pub exclusive_decoded_pcm: Option<DecodedPcmData>,
     pub exclusive_prepared_playback: Option<ExclusivePlaybackParams>,
     pub exclusive_playback: Option<ExclusivePlaybackSession>,
     pub exclusive_playback_ended: bool,
@@ -116,26 +75,18 @@ pub struct AudioRuntime {
 impl Default for AudioRuntime {
     fn default() -> Self {
         let decoder_backend = default_decoder_backend();
-        let shared_output_backend = default_shared_output_backend();
         eprintln!(
             "[NativeAudioSidecar][M2] decoder backend selected={}",
             decoder_backend.name()
         );
-        eprintln!(
-            "[NativeAudioSidecar][M3] shared output backend selected={}",
-            shared_output_backend.as_str()
-        );
+        eprintln!("[NativeAudioSidecar][M5] shared output backend fixed=cpal");
 
         Self {
             decoder_backend,
-            shared_output_backend,
-            output_stream: None,
-            output_handle: None,
-            sink: None,
             shared_cpal_output: None,
             loaded_audio: None,
+            loaded_source_info: None,
             shared_decoded_pcm: None,
-            exclusive_decoded_pcm: None,
             exclusive_prepared_playback: None,
             exclusive_playback: None,
             exclusive_playback_ended: false,
@@ -253,7 +204,7 @@ impl AudioRuntime {
 
         // If we already opened output in this process, probing again can fail because
         // our own shared stream occupies the endpoint. In that case, trust lock state.
-        if self.output_handle.is_some() || self.shared_cpal_output.is_some() {
+        if self.shared_cpal_output.is_some() {
             return true;
         }
 
@@ -344,8 +295,6 @@ impl AudioRuntime {
 
     pub fn reset_output_device(&mut self) {
         self.stop_sink();
-        self.output_handle = None;
-        self.output_stream = None;
         self.shared_cpal_output = None;
         self.exclusive_prepared_playback = None;
         self.exclusive_playback = None;
@@ -408,34 +357,16 @@ impl AudioRuntime {
             return Ok(());
         }
 
-        match self.shared_output_backend {
-            SharedOutputBackend::Rodio => {
-                if self.output_handle.is_some() {
-                    return Ok(());
-                }
-
-                let (stream, handle) = OutputStream::try_default()
-                    .map_err(|error| format!("Failed to open default output device: {error}"))?;
-
-                self.output_stream = Some(stream);
-                self.output_handle = Some(handle);
-            }
-            SharedOutputBackend::Cpal => {
-                if self.shared_cpal_output.is_some() {
-                    return Ok(());
-                }
-
-                let output = SharedCpalOutput::new_default()?;
-                eprintln!(
-                    "[NativeAudioSidecar][M3] shared cpal output initialized config={}",
-                    output.output_config_label()
-                );
-                self.shared_cpal_output = Some(output);
-                self.output_stream = None;
-                self.output_handle = None;
-            }
+        if self.shared_cpal_output.is_some() {
+            return Ok(());
         }
 
+        let output = SharedCpalOutput::new_default()?;
+        eprintln!(
+            "[NativeAudioSidecar][M3] shared cpal output initialized config={}",
+            output.output_config_label()
+        );
+        self.shared_cpal_output = Some(output);
         Ok(())
     }
 
@@ -444,8 +375,6 @@ impl AudioRuntime {
 
         if let Err(first_error) = self.initialize_output() {
             self.shared_cpal_output = None;
-            self.output_handle = None;
-            self.output_stream = None;
 
             return self.initialize_output().map_err(|second_error| {
                 format!("{first_error} (retry failed: {second_error})")
@@ -461,17 +390,13 @@ impl AudioRuntime {
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.set_playing(false);
         }
-
-        if let Some(sink) = self.sink.take() {
-            sink.stop();
-        }
     }
 
     pub fn clear_loaded_audio(&mut self) {
         self.stop_sink();
         self.loaded_audio = None;
+        self.loaded_source_info = None;
         self.shared_decoded_pcm = None;
-        self.exclusive_decoded_pcm = None;
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.clear_track();
         }
@@ -516,35 +441,30 @@ impl AudioRuntime {
     }
 
     fn prepare_exclusive_playback(&mut self, state: &EngineState) -> Result<(), String> {
-        let (source_info, conversion_path, samples) = {
-            let decoded = self.get_or_decode_exclusive_pcm()?;
-            (
-                decoded.source_info.clone(),
-                decoded.conversion_path,
-                Arc::clone(&decoded.samples),
-            )
-        };
-
-        let track = SharedPcmTrack {
-            samples,
-            channels: source_info.channels,
-            sample_rate_hz: source_info.sample_rate_hz,
+        let loaded_audio = self
+            .loaded_audio
+            .clone()
+            .ok_or_else(|| "No loaded audio is available.".to_string())?;
+        let source_info = if let Some(info) = self.loaded_source_info.clone() {
+            info
+        } else {
+            self.inspect_source_info(loaded_audio.data.clone())?
         };
         let conversion_path =
-            format!("{conversion_path}->exclusive-wasapi-worker");
+            "symphonia:stream-decode-f32->exclusive-wasapi-worker";
 
         self.emit_decode_audit(
             OutputMode::WasapiExclusive,
             state.target_sample_rate_hz,
             state.oversampling_filter_id.as_deref(),
             &source_info,
-            &conversion_path,
+            conversion_path,
             None,
         );
 
         self.stop_exclusive_playback();
         self.exclusive_prepared_playback = Some(ExclusivePlaybackParams {
-            track,
+            audio_data: loaded_audio.data,
             start_at_seconds: state.current_time_seconds.max(0.0),
             playback_rate: state.playback_rate.max(0.01),
             loop_enabled: state.loop_enabled,
@@ -584,7 +504,7 @@ impl AudioRuntime {
 
         let join_handle = thread::spawn(move || {
             let playback_result = run_default_exclusive_playback(
-                params.track,
+                params.audio_data,
                 params.start_at_seconds,
                 params.playback_rate,
                 params.loop_enabled,
@@ -620,15 +540,6 @@ impl AudioRuntime {
         Ok(())
     }
 
-    fn create_sink(&self) -> Result<Sink, String> {
-        let handle = self
-            .output_handle
-            .as_ref()
-            .ok_or_else(|| "Output device is not initialized.".to_string())?;
-
-        Sink::try_new(handle).map_err(|error| format!("Failed to create output sink: {error}"))
-    }
-
     fn shared_underrun_count(&self) -> Option<u64> {
         self.shared_cpal_output
             .as_ref()
@@ -647,40 +558,17 @@ impl AudioRuntime {
 
     fn get_or_decode_shared_pcm(&mut self) -> Result<&DecodedPcmData, String> {
         if self.shared_decoded_pcm.is_none() {
-            if let Some(exclusive_decoded) = self.exclusive_decoded_pcm.clone() {
-                self.shared_decoded_pcm = Some(exclusive_decoded);
-            } else {
-                let loaded_audio = self
-                    .loaded_audio
-                    .clone()
-                    .ok_or_else(|| "No loaded audio is available.".to_string())?;
-                let decoded = self.decoder_backend.decode_pcm(loaded_audio.data)?;
-                self.shared_decoded_pcm = Some(decoded);
-            }
+            let loaded_audio = self
+                .loaded_audio
+                .clone()
+                .ok_or_else(|| "No loaded audio is available.".to_string())?;
+            let decoded = self.decoder_backend.decode_pcm(loaded_audio.data)?;
+            self.shared_decoded_pcm = Some(decoded);
         }
 
         self.shared_decoded_pcm
             .as_ref()
             .ok_or_else(|| "Shared PCM decode cache is unavailable.".to_string())
-    }
-
-    fn get_or_decode_exclusive_pcm(&mut self) -> Result<&DecodedPcmData, String> {
-        if self.exclusive_decoded_pcm.is_none() {
-            if let Some(shared_decoded) = self.shared_decoded_pcm.clone() {
-                self.exclusive_decoded_pcm = Some(shared_decoded);
-            } else {
-                let loaded_audio = self
-                    .loaded_audio
-                    .clone()
-                    .ok_or_else(|| "No loaded audio is available.".to_string())?;
-                let decoded = self.decoder_backend.decode_pcm(loaded_audio.data)?;
-                self.exclusive_decoded_pcm = Some(decoded);
-            }
-        }
-
-        self.exclusive_decoded_pcm
-            .as_ref()
-            .ok_or_else(|| "Exclusive PCM decode cache is unavailable.".to_string())
     }
 
     pub fn fetch_audio_data(src: &str) -> Result<Arc<[u8]>, String> {
@@ -720,82 +608,45 @@ impl AudioRuntime {
             return Ok(());
         }
 
-        match self.shared_output_backend {
-            SharedOutputBackend::Rodio => {
-                let loaded_audio = self
-                    .loaded_audio
-                    .clone()
-                    .ok_or_else(|| "No loaded audio is available.".to_string())?;
-
-                let sink = self.create_sink()?;
-                sink.set_volume(state.volume as f32);
-
-                let decode_options = DecodePlaybackOptions {
-                    start_at_seconds: state.current_time_seconds,
-                    playback_rate: state.playback_rate,
-                    loop_enabled: state.loop_enabled,
-                };
-                let decoded_stream = self
-                    .decoder_backend
-                    .decode_stream(loaded_audio.data.clone(), decode_options)?;
-                let descriptor = decoded_stream.descriptor().clone();
-
-                self.emit_decode_audit(
-                    self.active_output_mode,
-                    state.target_sample_rate_hz,
-                    state.oversampling_filter_id.as_deref(),
-                    &descriptor.source_info,
-                    descriptor.conversion_path,
-                    None,
-                );
-                decoded_stream.append_to_sink(&sink)?;
-
-                self.stop_sink();
-                self.sink = Some(sink);
-            }
-            SharedOutputBackend::Cpal => {
-                if self.shared_cpal_output.is_none() {
-                    self.initialize_output()?;
-                }
-                let (source_info, conversion_path, samples) = {
-                    let decoded = self.get_or_decode_shared_pcm()?;
-                    (
-                        decoded.source_info.clone(),
-                        decoded.conversion_path,
-                        Arc::clone(&decoded.samples),
-                    )
-                };
-                let track = SharedPcmTrack {
-                    samples,
-                    channels: source_info.channels,
-                    sample_rate_hz: source_info.sample_rate_hz,
-                };
-                let conversion_path =
-                    format!("{conversion_path}->cpal-callback-step-rate");
-
-                self.emit_decode_audit(
-                    self.active_output_mode,
-                    state.target_sample_rate_hz,
-                    state.oversampling_filter_id.as_deref(),
-                    &source_info,
-                    &conversion_path,
-                    self.shared_underrun_count(),
-                );
-
-                self.stop_sink();
-                let shared_output = self
-                    .shared_cpal_output
-                    .as_ref()
-                    .ok_or_else(|| "Shared cpal output is not initialized.".to_string())?;
-                shared_output.set_track(
-                    track,
-                    state.current_time_seconds,
-                    state.playback_rate,
-                    state.loop_enabled,
-                    state.volume as f32,
-                );
-            }
+        if self.shared_cpal_output.is_none() {
+            self.initialize_output()?;
         }
+        let (source_info, conversion_path, samples) = {
+            let decoded = self.get_or_decode_shared_pcm()?;
+            (
+                decoded.source_info.clone(),
+                decoded.conversion_path,
+                Arc::clone(&decoded.samples),
+            )
+        };
+        let track = SharedPcmTrack {
+            samples,
+            channels: source_info.channels,
+            sample_rate_hz: source_info.sample_rate_hz,
+        };
+        let conversion_path = format!("{conversion_path}->cpal-callback-step-rate");
+
+        self.emit_decode_audit(
+            self.active_output_mode,
+            state.target_sample_rate_hz,
+            state.oversampling_filter_id.as_deref(),
+            &source_info,
+            &conversion_path,
+            self.shared_underrun_count(),
+        );
+
+        self.stop_sink();
+        let shared_output = self
+            .shared_cpal_output
+            .as_ref()
+            .ok_or_else(|| "Shared cpal output is not initialized.".to_string())?;
+        shared_output.set_track(
+            track,
+            state.current_time_seconds,
+            state.playback_rate,
+            state.loop_enabled,
+            state.volume as f32,
+        );
 
         Ok(())
     }
@@ -809,10 +660,6 @@ impl AudioRuntime {
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.set_playing(true);
         }
-
-        if let Some(sink) = &self.sink {
-            sink.play();
-        }
     }
 
     pub fn pause_sink(&mut self) {
@@ -823,10 +670,6 @@ impl AudioRuntime {
 
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.set_playing(false);
-        }
-
-        if let Some(sink) = &self.sink {
-            sink.pause();
         }
     }
 
@@ -840,6 +683,6 @@ impl AudioRuntime {
             return shared_output.is_ended();
         }
 
-        self.sink.as_ref().map(|sink| sink.empty()).unwrap_or(false)
+        false
     }
 }

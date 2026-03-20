@@ -1,16 +1,23 @@
 #[cfg(target_os = "windows")]
 mod wasapi_probe {
-    use crate::audio::SharedPcmTrack;
     use crate::error::ExclusiveProbeError;
-    use rodio::{Sample, Source};
     use rubato::{
         Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
         WindowFunction,
     };
     use std::ffi::c_void;
+    use std::io::{Cursor, ErrorKind};
     use std::sync::mpsc::Receiver;
+    use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
+    use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+    use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    use symphonia::default::{get_codecs, get_probe};
     use windows::core::{Error as WinError, HRESULT};
     use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
     use windows::Win32::Media::Audio::{self, IAudioClient, IAudioRenderClient, IMMDeviceEnumerator};
@@ -200,16 +207,126 @@ mod wasapi_probe {
         0.0
     }
 
-    #[derive(Clone)]
-    struct DecodedPcmSource {
-        track: SharedPcmTrack,
-        cursor_sample: usize,
+    fn audio_buffer_to_f32_vec(buffer: AudioBufferRef<'_>) -> Vec<f32> {
+        let mut sample_buffer =
+            SampleBuffer::<f32>::new(buffer.capacity() as u64, *buffer.spec());
+        sample_buffer.copy_interleaved_ref(buffer);
+        sample_buffer.samples().to_vec()
     }
 
-    impl DecodedPcmSource {
-        fn new(track: SharedPcmTrack) -> Result<Self, ExclusiveProbeError> {
-            let channels = track.channels as usize;
-            if channels == 0 || track.sample_rate_hz == 0 {
+    trait PlaybackSource: Iterator<Item = f32> {
+        fn channels(&self) -> u16;
+        fn sample_rate(&self) -> u32;
+    }
+
+    struct SymphoniaPlaybackSource {
+        format: Box<dyn symphonia::core::formats::FormatReader>,
+        decoder: Box<dyn symphonia::core::codecs::Decoder>,
+        track_id: u32,
+        channels: u16,
+        raw_sample_rate_hz: u32,
+        effective_sample_rate_hz: u32,
+        playback_rate: f64,
+        start_at_seconds: f64,
+        skip_budget_initialized: bool,
+        remaining_skip_samples: usize,
+        pending_samples: Vec<f32>,
+        pending_index: usize,
+        exhausted: bool,
+    }
+
+    impl SymphoniaPlaybackSource {
+        fn new(
+            audio_data: Arc<[u8]>,
+            start_at_seconds: f64,
+            playback_rate: f64,
+        ) -> Result<Self, ExclusiveProbeError> {
+            let playback_rate = if playback_rate.is_finite() {
+                playback_rate.max(0.01)
+            } else {
+                1.0
+            };
+            let start_at_seconds = if start_at_seconds.is_finite() {
+                start_at_seconds.max(0.0)
+            } else {
+                0.0
+            };
+
+            let media_source = Cursor::new(audio_data);
+            let source_stream =
+                MediaSourceStream::new(Box::new(media_source), Default::default());
+            let hint = Hint::new();
+            let probed = get_probe()
+                .format(
+                    &hint,
+                    source_stream,
+                    &FormatOptions::default(),
+                    &MetadataOptions::default(),
+                )
+                .map_err(|error| ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message: format!(
+                        "Failed to probe source format for exclusive playback: {error}"
+                    ),
+                })?;
+
+            let format = probed.format;
+            let default_track = format.default_track().ok_or_else(|| ExclusiveProbeError {
+                code: "source-decode-failed",
+                message:
+                    "Failed to locate default audio track for exclusive playback."
+                        .to_string(),
+            })?;
+            if default_track.codec_params.codec == CODEC_TYPE_NULL {
+                return Err(ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message:
+                        "Default track codec is not supported for exclusive playback."
+                        .to_string(),
+                });
+            }
+
+            let track_id = default_track.id;
+            let decoder = get_codecs()
+                .make(&default_track.codec_params, &DecoderOptions::default())
+                .map_err(|error| ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message: format!(
+                        "Failed to create decoder for exclusive playback: {error}"
+                    ),
+                })?;
+
+            let channels = default_track
+                .codec_params
+                .channels
+                .map(|value| value.count() as u16)
+                .unwrap_or(0);
+            let raw_sample_rate_hz =
+                default_track.codec_params.sample_rate.unwrap_or(0);
+            let effective_sample_rate_hz =
+                ((raw_sample_rate_hz as f64 * playback_rate) as u32).max(1);
+
+            let mut source = Self {
+                format,
+                decoder,
+                track_id,
+                channels,
+                raw_sample_rate_hz,
+                effective_sample_rate_hz,
+                playback_rate,
+                start_at_seconds,
+                skip_budget_initialized: start_at_seconds <= 0.0,
+                remaining_skip_samples: 0,
+                pending_samples: Vec::new(),
+                pending_index: 0,
+                exhausted: false,
+            };
+
+            if source.channels == 0 || source.raw_sample_rate_hz == 0 {
+                source.refill_pending()?;
+            }
+
+            if source.channels == 0 || source.raw_sample_rate_hz == 0 {
                 return Err(ExclusiveProbeError {
                     code: "source-decode-failed",
                     message:
@@ -218,85 +335,168 @@ mod wasapi_probe {
                 });
             }
 
-            let total_frames = track.samples.len() / channels;
-            if total_frames == 0 {
-                return Err(ExclusiveProbeError {
-                    code: "source-decode-failed",
-                    message: "Decoded source produced zero PCM frames for exclusive playback."
-                        .to_string(),
-                });
+            Ok(source)
+        }
+
+        fn refill_pending(&mut self) -> Result<(), ExclusiveProbeError> {
+            self.pending_samples.clear();
+            self.pending_index = 0;
+
+            while !self.exhausted {
+                let packet = match self.format.next_packet() {
+                    Ok(packet) => packet,
+                    Err(SymphoniaError::IoError(error))
+                        if error.kind() == ErrorKind::UnexpectedEof =>
+                    {
+                        self.exhausted = true;
+                        return Ok(());
+                    }
+                    Err(SymphoniaError::ResetRequired) => {
+                        return Err(ExclusiveProbeError {
+                            code: "source-decode-failed",
+                            message:
+                                "Symphonia decoder reset is required but not yet supported."
+                                    .to_string(),
+                        });
+                    }
+                    Err(error) => {
+                        return Err(ExclusiveProbeError {
+                            code: "source-decode-failed",
+                            message: format!(
+                                "Failed to read next packet for exclusive playback: {error}"
+                            ),
+                        });
+                    }
+                };
+
+                if packet.track_id() != self.track_id {
+                    continue;
+                }
+
+                {
+                    let decoded = match self.decoder.decode(&packet) {
+                        Ok(decoded) => decoded,
+                        Err(SymphoniaError::DecodeError(_)) => continue,
+                        Err(SymphoniaError::ResetRequired) => {
+                            return Err(ExclusiveProbeError {
+                                code: "source-decode-failed",
+                                message:
+                                    "Symphonia decoder reset is required but not yet supported."
+                                        .to_string(),
+                            });
+                        }
+                        Err(error) => {
+                            return Err(ExclusiveProbeError {
+                                code: "source-decode-failed",
+                                message: format!(
+                                    "Failed to decode packet for exclusive playback: {error}"
+                                ),
+                            });
+                        }
+                    };
+
+                    if self.channels == 0 {
+                        self.channels = decoded.spec().channels.count() as u16;
+                    }
+                    if self.raw_sample_rate_hz == 0 {
+                        self.raw_sample_rate_hz = decoded.spec().rate;
+                        self.effective_sample_rate_hz =
+                            ((self.raw_sample_rate_hz as f64 * self.playback_rate) as u32).max(1);
+                    }
+
+                    let local_buffer = audio_buffer_to_f32_vec(decoded);
+                    self.append_decoded_samples(&local_buffer);
+                }
+                if !self.pending_samples.is_empty() {
+                    return Ok(());
+                }
             }
 
-            Ok(Self {
-                track,
-                cursor_sample: 0,
-            })
+            Ok(())
         }
     }
 
-    impl Iterator for DecodedPcmSource {
+    impl SymphoniaPlaybackSource {
+        fn append_decoded_samples(&mut self, interleaved: &[f32]) {
+            if interleaved.is_empty() {
+                return;
+            }
+
+            if !self.skip_budget_initialized && self.start_at_seconds > 0.0 {
+                if self.raw_sample_rate_hz > 0 && self.channels > 0 {
+                    let seek_start_frames =
+                        (self.start_at_seconds * self.raw_sample_rate_hz as f64)
+                            .floor()
+                            .max(0.0) as usize;
+                    self.remaining_skip_samples =
+                        seek_start_frames.saturating_mul(self.channels as usize);
+                }
+                self.skip_budget_initialized = true;
+            }
+
+            if self.remaining_skip_samples > 0 {
+                let skip = self.remaining_skip_samples.min(interleaved.len());
+                self.remaining_skip_samples -= skip;
+                if skip >= interleaved.len() {
+                    return;
+                }
+                self.pending_samples
+                    .extend_from_slice(&interleaved[skip..]);
+                return;
+            }
+
+            self.pending_samples.extend_from_slice(interleaved);
+        }
+    }
+
+    impl Iterator for SymphoniaPlaybackSource {
         type Item = f32;
 
         fn next(&mut self) -> Option<Self::Item> {
-            let sample = self.track.samples.get(self.cursor_sample).copied()?;
-            self.cursor_sample = self.cursor_sample.saturating_add(1);
-            Some(sample)
+            loop {
+                if self.pending_index < self.pending_samples.len() {
+                    let sample = self.pending_samples[self.pending_index];
+                    self.pending_index = self.pending_index.saturating_add(1);
+                    return Some(sample);
+                }
+
+                if self.exhausted {
+                    return None;
+                }
+
+                if let Err(error) = self.refill_pending() {
+                    eprintln!(
+                        "[NativeAudioSidecar] exclusive source decode failed: {} ({})",
+                        error.message, error.code
+                    );
+                    self.exhausted = true;
+                    return None;
+                }
+            }
         }
     }
 
-    impl Source for DecodedPcmSource {
-        fn current_frame_len(&self) -> Option<usize> {
-            Some(self.track.samples.len().saturating_sub(self.cursor_sample))
-        }
-
+    impl PlaybackSource for SymphoniaPlaybackSource {
         fn channels(&self) -> u16 {
-            self.track.channels
+            self.channels
         }
 
         fn sample_rate(&self) -> u32 {
-            self.track.sample_rate_hz
-        }
-
-        fn total_duration(&self) -> Option<Duration> {
-            let channels = self.track.channels as usize;
-            if channels == 0 || self.track.sample_rate_hz == 0 {
-                return None;
-            }
-            let frame_count = self.track.samples.len() / channels;
-            Some(Duration::from_secs_f64(
-                frame_count as f64 / self.track.sample_rate_hz as f64,
-            ))
+            self.effective_sample_rate_hz
         }
     }
 
-    type ExclusivePlaybackSource =
-        rodio::source::Speed<rodio::source::SkipDuration<DecodedPcmSource>>;
-
     fn build_exclusive_playback_source(
-        track: SharedPcmTrack,
+        audio_data: Arc<[u8]>,
         start_at_seconds: f64,
         playback_rate: f64,
-    ) -> Result<ExclusivePlaybackSource, ExclusiveProbeError> {
-        let start_at_seconds = if start_at_seconds.is_finite() {
-            start_at_seconds.max(0.0)
-        } else {
-            0.0
-        };
-        let playback_rate = if playback_rate.is_finite() {
-            playback_rate.max(0.01)
-        } else {
-            1.0
-        };
-        let source = DecodedPcmSource::new(track)?;
-        Ok(source
-            .skip_duration(Duration::from_secs_f64(start_at_seconds))
-            .speed(playback_rate as f32))
+    ) -> Result<SymphoniaPlaybackSource, ExclusiveProbeError> {
+        SymphoniaPlaybackSource::new(audio_data, start_at_seconds, playback_rate)
     }
 
     struct HqResampledIterator<S>
     where
-        S: Source + Send,
-        S::Item: Sample,
+        S: PlaybackSource,
     {
         source: S,
         input_channels: usize,
@@ -311,7 +511,7 @@ mod wasapi_probe {
         failed: bool,
     }
 
-    trait ExclusiveSampleProducer: Send {
+    trait ExclusiveSampleProducer {
         fn fill_samples(
             &mut self,
             output: &mut Vec<f32>,
@@ -321,14 +521,14 @@ mod wasapi_probe {
 
     struct IteratorSampleProducer<I>
     where
-        I: Iterator<Item = f32> + Send,
+        I: Iterator<Item = f32>,
     {
         iterator: I,
     }
 
     impl<I> ExclusiveSampleProducer for IteratorSampleProducer<I>
     where
-        I: Iterator<Item = f32> + Send,
+        I: Iterator<Item = f32>,
     {
         fn fill_samples(
             &mut self,
@@ -349,16 +549,14 @@ mod wasapi_probe {
 
     struct HqSampleProducer<S>
     where
-        S: Source + Send,
-        S::Item: Sample,
+        S: PlaybackSource,
     {
         iterator: HqResampledIterator<S>,
     }
 
     impl<S> ExclusiveSampleProducer for HqSampleProducer<S>
     where
-        S: Source + Send,
-        S::Item: Sample,
+        S: PlaybackSource,
     {
         fn fill_samples(
             &mut self,
@@ -371,8 +569,7 @@ mod wasapi_probe {
 
     impl<S> HqResampledIterator<S>
     where
-        S: Source + Send,
-        S::Item: Sample,
+        S: PlaybackSource,
     {
         fn new(
             source: S,
@@ -487,7 +684,7 @@ mod wasapi_probe {
                         self.source_exhausted = true;
                         break 'read_frames;
                     };
-                    self.frame_buffer[channel] = sample.to_f32();
+                    self.frame_buffer[channel] = sample;
                 }
 
                 for output_channel in 0..self.output_channels {
@@ -594,8 +791,7 @@ mod wasapi_probe {
 
     impl<S> Iterator for HqResampledIterator<S>
     where
-        S: Source + Send,
-        S::Item: Sample,
+        S: PlaybackSource,
     {
         type Item = f32;
 
@@ -1084,7 +1280,7 @@ mod wasapi_probe {
     }
 
     pub(crate) fn run_default_exclusive_playback(
-        track: SharedPcmTrack,
+        audio_data: Arc<[u8]>,
         start_at_seconds: f64,
         playback_rate: f64,
         loop_enabled: bool,
@@ -1155,7 +1351,7 @@ mod wasapi_probe {
                 })?;
 
                 let source = build_exclusive_playback_source(
-                    track.clone(),
+                    audio_data.clone(),
                     start_at_seconds,
                     playback_rate,
                 )?;
@@ -1324,7 +1520,7 @@ mod wasapi_probe {
                 let make_sample_producer =
                     || -> Result<Box<dyn ExclusiveSampleProducer>, ExclusiveProbeError> {
                         let source = build_exclusive_playback_source(
-                            track.clone(),
+                            audio_data.clone(),
                             start_at_seconds,
                             playback_rate,
                         )?;
@@ -1340,7 +1536,7 @@ mod wasapi_probe {
 
                         if use_passthrough {
                             Ok(Box::new(IteratorSampleProducer {
-                                iterator: source.map(|sample| sample.to_f32()),
+                                iterator: source,
                             }))
                         } else {
                             Ok(Box::new(HqSampleProducer {
@@ -1665,9 +1861,9 @@ mod wasapi_probe {
 
 #[cfg(not(target_os = "windows"))]
 mod wasapi_probe {
-    use crate::audio::SharedPcmTrack;
     use crate::error::ExclusiveProbeError;
     use std::sync::mpsc::Receiver;
+    use std::sync::Arc;
 
     pub(crate) fn probe_default_exclusive_open() -> Result<(), ExclusiveProbeError> {
         Err(ExclusiveProbeError {
@@ -1677,7 +1873,7 @@ mod wasapi_probe {
     }
 
     pub(crate) fn run_default_exclusive_playback(
-        _track: SharedPcmTrack,
+        _audio_data: Arc<[u8]>,
         _start_at_seconds: f64,
         _playback_rate: f64,
         _loop_enabled: bool,

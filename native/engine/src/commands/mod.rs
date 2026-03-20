@@ -301,6 +301,7 @@ pub fn handle_command(
                     };
 
                     let inspected_source = runtime.inspect_source_info(audio_data.clone());
+                    let inspected_source_info = inspected_source.as_ref().ok().cloned();
                     if let Ok(source_info) = inspected_source.as_ref() {
                         runtime.emit_decode_audit(
                             state.output_mode,
@@ -366,8 +367,8 @@ pub fn handle_command(
                     state.last_tick_instant = None;
 
                     runtime.loaded_audio = Some(LoadedAudio { data: audio_data });
+                    runtime.loaded_source_info = inspected_source_info;
                     runtime.shared_decoded_pcm = None;
-                    runtime.exclusive_decoded_pcm = None;
 
                     if let Err(message) = runtime.rebuild_sink_from_state(state) {
                         emit_command_error(
@@ -582,9 +583,6 @@ pub fn handle_command(
                     }
                 } else {
                     runtime.set_shared_volume(params.volume as f32);
-                    if let Some(sink) = &runtime.sink {
-                        sink.set_volume(params.volume as f32);
-                    }
                 }
 
                 emit_response_ok(&request.id, Some(command_result_ok_value()))?;
