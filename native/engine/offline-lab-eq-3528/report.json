@@ -1,0 +1,67 @@
+{
+  "source": "C:\\aonsoku\\cypress\\fixtures\\song.mp3",
+  "sourceSampleRateHz": 44100,
+  "sourceChannels": 2,
+  "sourceDurationSeconds": 207.0987755102041,
+  "targetSampleRateHz": 352800,
+  "writeWav": false,
+  "outputDir": "C:\\aonsoku\\native\\engine\\offline-lab-eq-3528",
+  "notes": [
+    "Target sample rate was normalized from 384000 Hz to 352800 Hz to match source family (44100 Hz).",
+    "Decoder backend: symphonia"
+  ],
+  "cases": [
+    {
+      "filterToken": "poly-sinc-long-lp",
+      "filterId": "poly-sinc-long-lp",
+      "profileLabel": "poly-sinc-long-lp",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "frames": 73066480,
+      "durationSeconds": 207.10453514739228,
+      "processingTimeMs": 9179.5432,
+      "peakDbfs": 0.8363629110047492,
+      "truePeakDbfs": 0.8363629110047492,
+      "rmsDbfs": -10.848368465923219,
+      "crestFactorDb": 11.684731376927967,
+      "clipSamples": 114,
+      "clipRatio": 7.801114820366329e-7,
+      "wavPath": null
+    }
+  ],
+  "comparisons": [],
+  "selfNulls": [
+    {
+      "filterToken": "poly-sinc-long-lp",
+      "outputSampleRateHz": 352800,
+      "lagFrames": 0,
+      "overlapFrames": 73066480,
+      "residualPeakDbfs": null,
+      "residualRmsDbfs": null,
+      "residualRmsRelativeDb": null,
+      "residualRmsRelativeDbGainMatched": null,
+      "gainMatchedSnrDb": null,
+      "bitExact": true
+    }
+  ],
+  "impulseAnalyses": [
+    {
+      "filterToken": "poly-sinc-long-lp",
+      "filterId": "poly-sinc-long-lp",
+      "profileLabel": "poly-sinc-long-lp",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "impulseInputFrames": 65536,
+      "impulseOutputFrames": 526320,
+      "fftSize": 1048576,
+      "effectiveNyquistHz": 22050.0,
+      "passbandEndHz": 20947.5,
+      "passbandPeakDb": 17.049559645854494,
+      "stopbandStartHz": 22050.0,
+      "stopbandEndHz": 176400.0,
+      "stopbandPeakDb": -111.95501711824006,
+      "stopbandAttenuationDb": -129.00457676409457,
+      "impulseWavPath": null
+    }
+  ]
+}

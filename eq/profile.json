@@ -1,0 +1,40 @@
+{
+  "preampDb": -4.98,
+  "bands": [
+    {
+      "enabled": true,
+      "type": "LSC",
+      "frequencyHz": 105.0,
+      "gainDb": 6.3,
+      "q": 0.7
+    },
+    {
+      "enabled": true,
+      "type": "PK",
+      "frequencyHz": 75.7,
+      "gainDb": -3.2,
+      "q": 0.32
+    },
+    {
+      "enabled": true,
+      "type": "PK",
+      "frequencyHz": 1805.2,
+      "gainDb": 4.1,
+      "q": 1.62
+    },
+    {
+      "enabled": true,
+      "type": "PK",
+      "frequencyHz": 2912.9,
+      "gainDb": -4.0,
+      "q": 3.59
+    },
+    {
+      "enabled": true,
+      "type": "HSC",
+      "frequencyHz": 10000.0,
+      "gainDb": -1.9,
+      "q": 0.7
+    }
+  ]
+}

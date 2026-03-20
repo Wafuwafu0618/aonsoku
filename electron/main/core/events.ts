@@ -6,6 +6,7 @@ import {
   IpcChannels,
   LocalLibraryFileEntry,
   OverlayColors,
+  ParametricEqFileEntry,
   PlayerStatePayload,
 } from '../../preload/types'
 import { isQuitting } from '../index'
@@ -237,6 +238,28 @@ export function setupIpcEvents(window: BrowserWindow | null) {
       name: basename(selectedPath),
     }
   })
+
+  ipcMain.removeHandler(IpcChannels.PickParametricEqFile)
+  ipcMain.handle(
+    IpcChannels.PickParametricEqFile,
+    async (): Promise<ParametricEqFileEntry | null> => {
+      const result = await dialog.showOpenDialog(window, {
+        title: 'Parametric EQファイルを選択',
+        properties: ['openFile'],
+        filters: [{ name: 'Text Files', extensions: ['txt'] }],
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      const selectedPath = result.filePaths[0]
+      return {
+        path: selectedPath,
+        name: basename(selectedPath),
+      }
+    },
+  )
 
   ipcMain.removeHandler(IpcChannels.ListLocalLibraryFiles)
   ipcMain.handle(

@@ -10,6 +10,7 @@ import {
   createDefaultOversamplingCapability,
   createDefaultOversamplingSettings,
 } from '@/oversampling/defaults'
+import { ParametricEqProfile } from '@/parametric-eq'
 import { IPlayerContext, ISongList, LoopState } from '@/types/playerContext'
 import { ISong } from '@/types/responses/song'
 import { areSongListsEqual } from '@/utils/compareSongLists'
@@ -204,6 +205,24 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 setCapability: (value) => {
                   set((state) => {
                     state.settings.oversampling.capability = value
+                  })
+                },
+              },
+            },
+            parametricEq: {
+              values: {
+                enabled: false,
+                profile: null as ParametricEqProfile | null,
+              },
+              actions: {
+                setParametricEqEnabled: (value) => {
+                  set((state) => {
+                    state.settings.parametricEq.values.enabled = value
+                  })
+                },
+                setParametricEqProfile: (value) => {
+                  set((state) => {
+                    state.settings.parametricEq.values.profile = value
                   })
                 },
               },
@@ -932,6 +951,10 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                   createDefaultOversamplingSettings()
                 state.settings.oversampling.capability =
                   createDefaultOversamplingCapability()
+                state.settings.parametricEq.values = {
+                  enabled: false,
+                  profile: null,
+                }
               })
             },
             setCurrentSongColor: (value) => {
@@ -1072,6 +1095,14 @@ export const useOversamplingState = () =>
 
 export const useOversamplingActions = () =>
   usePlayerStore((state) => state.settings.oversampling.actions)
+
+export const useParametricEqState = () =>
+  usePlayerStore((state) => ({
+    ...state.settings.parametricEq.values,
+  }))
+
+export const useParametricEqActions = () =>
+  usePlayerStore((state) => state.settings.parametricEq.actions)
 
 export const useFullscreenPlayerSettings = () =>
   usePlayerStore((state) => state.settings.fullscreen)

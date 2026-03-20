@@ -90,6 +90,8 @@ const api: IAonsokuAPI = {
   },
   pickLocalLibraryDirectory: () =>
     ipcRenderer.invoke(IpcChannels.PickLocalLibraryDirectory),
+  pickParametricEqFile: () =>
+    ipcRenderer.invoke(IpcChannels.PickParametricEqFile),
   listLocalLibraryFiles: (directories) =>
     ipcRenderer.invoke(IpcChannels.ListLocalLibraryFiles, directories),
   readLocalLibraryFile: (path) =>

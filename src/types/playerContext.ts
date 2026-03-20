@@ -10,6 +10,7 @@ import {
   OversamplingSettingsValues,
   OversamplingTargetRatePolicy,
 } from '@/oversampling/types'
+import { ParametricEqProfile } from '@/parametric-eq'
 
 export enum LoopState {
   Off = 0,
@@ -98,6 +99,21 @@ interface IOversampling {
   actions: IOversamplingActions
 }
 
+interface IParametricEqData {
+  enabled: boolean
+  profile: ParametricEqProfile | null
+}
+
+interface IParametricEqActions {
+  setParametricEqEnabled: (value: boolean) => void
+  setParametricEqProfile: (value: ParametricEqProfile | null) => void
+}
+
+interface IParametricEq {
+  values: IParametricEqData
+  actions: IParametricEqActions
+}
+
 interface IFullscreen {
   autoFullscreenEnabled: boolean
   setAutoFullscreenEnabled: (value: boolean) => void
@@ -152,6 +168,7 @@ export interface IPlayerSettings {
   lyrics: ILyrics
   replayGain: IReplayGain
   oversampling: IOversampling
+  parametricEq: IParametricEq
   privacy: IPrivacySettings
   colors: IColorsSettings
 }

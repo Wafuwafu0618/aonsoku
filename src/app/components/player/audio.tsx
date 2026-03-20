@@ -26,6 +26,8 @@ import {
   usePlayerMediaType,
   useOversamplingActions,
   useOversamplingState,
+  useParametricEqActions,
+  useParametricEqState,
   usePlayerVolume,
   useReplayGainActions,
   useReplayGainState,
@@ -98,16 +100,20 @@ function resolveTargetSampleRateHz(
 function shouldUseNativeBackendForSong(
   isSong: boolean,
   oversamplingEnabled: boolean,
+  parametricEqEnabled: boolean,
   nativeApiAvailable: boolean,
   outputApi: NativeAudioOutputMode,
   outputApiSupported: boolean,
 ): boolean {
-  if (
-    !isSong ||
-    !oversamplingEnabled ||
-    !nativeApiAvailable ||
-    !outputApiSupported
-  ) {
+  if (!isSong || !nativeApiAvailable) {
+    return false
+  }
+
+  if (parametricEqEnabled) {
+    return true
+  }
+
+  if (!oversamplingEnabled || !outputApiSupported) {
     return false
   }
 
@@ -163,11 +169,16 @@ export function AudioPlayer({
     onFailurePolicy: oversamplingOnFailurePolicy,
     capability: oversamplingCapability,
   } = useOversamplingState()
+  const {
+    enabled: parametricEqEnabled,
+    profile: parametricEqProfile,
+  } = useParametricEqState()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
     usePlayerActions()
   const { setCapability, setEnabled, setEnginePreference, setOutputApi } =
     useOversamplingActions()
+  const { setParametricEqEnabled } = useParametricEqActions()
   const { setReplayGainEnabled, setReplayGainError } = useReplayGainActions()
   const { volume } = usePlayerVolume()
   const isPlaying = usePlayerIsPlaying()
@@ -181,7 +192,9 @@ export function AudioPlayer({
 
   const nativeApiAvailable = hasNativeAudioApi()
 
-  const nativeOutputMode = oversamplingOutputApi as NativeAudioOutputMode
+  const nativeOutputMode = (parametricEqEnabled
+    ? 'wasapi-exclusive'
+    : oversamplingOutputApi) as NativeAudioOutputMode
   const oversamplingTargetSampleRateHz = oversamplingEnabled
     ? resolveTargetSampleRateHz(oversamplingTargetRatePolicy)
     : undefined
@@ -193,10 +206,33 @@ export function AudioPlayer({
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
+    parametricEqEnabled,
     nativeApiAvailable,
     nativeOutputMode,
     isSelectedOutputApiSupported,
   )
+  const parametricEqLoadConfig = useMemo(() => {
+    if (!parametricEqEnabled || !parametricEqProfile) {
+      return undefined
+    }
+
+    return {
+      preampDb: parametricEqProfile.preampDb,
+      bands: parametricEqProfile.bands.map((band) => ({
+        enabled: band.enabled,
+        type: band.type,
+        frequencyHz: band.frequencyHz,
+        gainDb: band.gainDb,
+        q: band.q,
+      })),
+    }
+  }, [parametricEqEnabled, parametricEqProfile])
+  const shouldApplyParametricEq = Boolean(
+    parametricEqLoadConfig && nativeOutputMode === 'wasapi-exclusive',
+  )
+  const parametricEqForLoad = shouldApplyParametricEq
+    ? parametricEqLoadConfig
+    : undefined
   const useWebAudioSongPath = isSong && !useNativeSongBackend
   const shouldAttachWebAudioGraph =
     useWebAudioSongPath && (replayGainEnabled || oversamplingEnabled)
@@ -462,6 +498,10 @@ export function AudioPlayer({
             if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
               setEnabled(false)
             }
+            if (resolvedMode === 'wasapi-shared' && parametricEqEnabled) {
+              setParametricEqEnabled(false)
+              toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
+            }
           }
         }
 
@@ -473,6 +513,7 @@ export function AudioPlayer({
           autoplay: isPlayingRef.current,
           targetSampleRateHz: oversamplingTargetSampleRateHz,
           oversamplingFilterId,
+          parametricEq: parametricEqForLoad,
         })
 
         if (backend instanceof NativePlaybackBackend) {
@@ -481,6 +522,10 @@ export function AudioPlayer({
             setOutputApi(resolvedMode)
             if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
               setEnabled(false)
+            }
+            if (resolvedMode === 'wasapi-shared' && parametricEqEnabled) {
+              setParametricEqEnabled(false)
+              toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
             }
           }
         }
@@ -504,6 +549,10 @@ export function AudioPlayer({
             if (oversamplingEnabled) {
               setEnabled(false)
             }
+            if (parametricEqEnabled) {
+              setParametricEqEnabled(false)
+              toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
+            }
           }
 
           await backend.load({
@@ -512,6 +561,7 @@ export function AudioPlayer({
             autoplay: isPlayingRef.current,
             targetSampleRateHz: oversamplingTargetSampleRateHz,
             oversamplingFilterId,
+            parametricEq: undefined,
           })
 
           if (backend instanceof NativePlaybackBackend) {
@@ -520,6 +570,10 @@ export function AudioPlayer({
               setOutputApi(resolvedMode)
               if (resolvedMode === 'wasapi-shared' && oversamplingEnabled) {
                 setEnabled(false)
+              }
+              if (resolvedMode === 'wasapi-shared' && parametricEqEnabled) {
+                setParametricEqEnabled(false)
+                toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
               }
             }
           }
@@ -554,9 +608,13 @@ export function AudioPlayer({
     oversamplingEnabled,
     oversamplingFilterId,
     oversamplingTargetSampleRateHz,
+    parametricEqEnabled,
+    parametricEqForLoad,
     setEnabled,
+    setParametricEqEnabled,
     setOutputApi,
     src,
+    t,
     useNativeSongBackend,
   ])
   useEffect(() => {

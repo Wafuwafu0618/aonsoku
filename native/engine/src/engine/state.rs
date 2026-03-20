@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use crate::audio::ParametricEqConfig;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
     WasapiShared,
@@ -48,6 +50,7 @@ pub struct EngineState {
     pub duration_seconds: f64,
     pub target_sample_rate_hz: Option<u32>,
     pub oversampling_filter_id: Option<String>,
+    pub parametric_eq: Option<ParametricEqConfig>,
     pub last_tick_instant: Option<Instant>,
 }
 
@@ -65,6 +68,7 @@ impl Default for EngineState {
             duration_seconds: 0.0,
             target_sample_rate_hz: None,
             oversampling_filter_id: None,
+            parametric_eq: None,
             last_tick_instant: None,
         }
     }
@@ -88,6 +92,7 @@ impl EngineState {
         self.duration_seconds = 0.0;
         self.target_sample_rate_hz = None;
         self.oversampling_filter_id = None;
+        self.parametric_eq = None;
         self.last_tick_instant = None;
     }
 

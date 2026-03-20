@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { startTransition, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -66,7 +66,7 @@ const urlIsValid = url !== defaultUrl
 export function LoginForm() {
   const [loading, setLoading] = useState(false)
   const [serverIsIncompatible, setServerIsIncompatible] = useState(false)
-  const { saveConfig } = useAppActions()
+  const { saveConfig, skipServerLogin } = useAppActions()
   const { hideServer } = useAppData()
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -111,6 +111,13 @@ export function LoginForm() {
       setLoading(false)
       toast.error(t('toast.server.error'))
     }
+  }
+
+  function onSkipServerLogin() {
+    skipServerLogin()
+    startTransition(() => {
+      navigate(ROUTES.LIBRARY.HOME, { replace: true })
+    })
   }
 
   return (
@@ -195,7 +202,7 @@ export function LoginForm() {
               />
             </CardContent>
 
-            <CardFooter className="flex">
+            <CardFooter className="flex flex-col gap-2">
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? (
                   <>
@@ -205,6 +212,15 @@ export function LoginForm() {
                 ) : (
                   <>{t('login.form.connect')}</>
                 )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={onSkipServerLogin}
+                disabled={loading}
+              >
+                {t('login.form.skip')}
               </Button>
             </CardFooter>
           </form>

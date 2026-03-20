@@ -9,8 +9,8 @@ use std::thread;
 use url::Url;
 
 use crate::audio::{
-    probe_default_exclusive_open, run_default_exclusive_playback, SharedCpalOutput,
-    SharedPcmTrack,
+    probe_default_exclusive_open, run_default_exclusive_playback, ParametricEqConfig,
+    SharedCpalOutput, SharedPcmTrack,
 };
 use crate::decoder::{
     default_decoder_backend, DecodedPcmData, DecodedSourceInfo, DecoderBackend,
@@ -34,6 +34,7 @@ pub struct ExclusivePlaybackParams {
     pub volume: f32,
     pub target_sample_rate_hz: Option<u32>,
     pub oversampling_filter_id: Option<String>,
+    pub parametric_eq: Option<ParametricEqConfig>,
 }
 
 pub struct ExclusivePlaybackSession {
@@ -385,7 +386,7 @@ impl AudioRuntime {
     }
 
     pub fn stop_sink(&mut self) {
-        self.stop_exclusive_playback();
+        self.stop_exclusive_playback("stop_sink");
 
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.set_playing(false);
@@ -430,12 +431,21 @@ impl AudioRuntime {
         }
     }
 
-    fn stop_exclusive_playback(&mut self) {
+    fn stop_exclusive_playback(&mut self, reason: &str) {
         if let Some(mut session) = self.exclusive_playback.take() {
+            eprintln!(
+                "[NativeAudioSidecar] stop_exclusive_playback reason={} activeSession=true",
+                reason
+            );
             session.request_stop();
             if let Some(handle) = session.join_handle.take() {
                 let _ = handle.join();
             }
+        } else {
+            eprintln!(
+                "[NativeAudioSidecar] stop_exclusive_playback reason={} activeSession=false",
+                reason
+            );
         }
         self.exclusive_playback_ended = false;
     }
@@ -462,7 +472,7 @@ impl AudioRuntime {
             None,
         );
 
-        self.stop_exclusive_playback();
+        self.stop_exclusive_playback("prepare_exclusive_playback");
         self.exclusive_prepared_playback = Some(ExclusivePlaybackParams {
             audio_data: loaded_audio.data,
             start_at_seconds: state.current_time_seconds.max(0.0),
@@ -471,6 +481,7 @@ impl AudioRuntime {
             volume: state.volume as f32,
             target_sample_rate_hz: state.target_sample_rate_hz,
             oversampling_filter_id: state.oversampling_filter_id.clone(),
+            parametric_eq: state.parametric_eq.clone(),
         });
         self.exclusive_playback_ended = false;
 
@@ -511,6 +522,7 @@ impl AudioRuntime {
                 params.volume,
                 params.target_sample_rate_hz,
                 params.oversampling_filter_id,
+                params.parametric_eq,
                 stop_receiver,
             );
 
@@ -664,7 +676,7 @@ impl AudioRuntime {
 
     pub fn pause_sink(&mut self) {
         if self.active_output_mode == OutputMode::WasapiExclusive {
-            self.stop_exclusive_playback();
+            self.stop_exclusive_playback("pause_sink");
             return;
         }
 

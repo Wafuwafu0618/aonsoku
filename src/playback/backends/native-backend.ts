@@ -166,6 +166,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
   private currentSource: string | null = null
   private currentTargetSampleRateHz: number | undefined
   private currentOversamplingFilterId: string | undefined
+  private currentParametricEqSignature: string | undefined
 
   private outputMode: NativeAudioOutputMode
 
@@ -470,11 +471,17 @@ export class NativePlaybackBackend implements PlaybackBackend {
       request.oversamplingFilterId.length > 0
         ? request.oversamplingFilterId
         : undefined
+    const requestedParametricEqSignature =
+      request.parametricEq && request.parametricEq.bands.length > 0
+        ? JSON.stringify(request.parametricEq)
+        : undefined
     const sameSource = this.currentSource === normalizedSrc
     const sameTargetRate =
       this.currentTargetSampleRateHz === requestedTargetSampleRateHz
     const sameOversamplingFilter =
       this.currentOversamplingFilterId === requestedOversamplingFilterId
+    const sameParametricEq =
+      this.currentParametricEqSignature === requestedParametricEqSignature
     const sameLoop =
       typeof request.loop !== 'boolean' || request.loop === this.loop
     const samePlaybackRate =
@@ -488,6 +495,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
       sameSource &&
       sameTargetRate &&
       sameOversamplingFilter &&
+      sameParametricEq &&
       sameLoop &&
       samePlaybackRate &&
       !hasExplicitSeek
@@ -550,6 +558,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
         this.currentSource = normalizedSrc
         this.currentTargetSampleRateHz = requestedTargetSampleRateHz
         this.currentOversamplingFilterId = requestedOversamplingFilterId
+        this.currentParametricEqSignature = requestedParametricEqSignature
         return
       }
 
@@ -562,6 +571,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
       this.currentSource = normalizedSrc
       this.currentTargetSampleRateHz = requestedTargetSampleRateHz
       this.currentOversamplingFilterId = requestedOversamplingFilterId
+      this.currentParametricEqSignature = requestedParametricEqSignature
     } catch (error) {
       const payload = toErrorPayload(
         error,
@@ -571,6 +581,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
       this.currentSource = null
       this.currentTargetSampleRateHz = undefined
       this.currentOversamplingFilterId = undefined
+      this.currentParametricEqSignature = undefined
       this.status = 'error'
       this.errorMessage = payload.message
       this.emit('error')
@@ -725,6 +736,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
     this.currentSource = null
     this.currentTargetSampleRateHz = undefined
     this.currentOversamplingFilterId = undefined
+    this.currentParametricEqSignature = undefined
 
     const api = readApi()
     if (!api) return

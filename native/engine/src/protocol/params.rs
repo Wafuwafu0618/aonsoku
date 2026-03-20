@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::audio::ParametricEqConfig;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetOutputModeParams {
@@ -24,6 +26,8 @@ pub struct LoadParams {
     pub target_sample_rate_hz: Option<u32>,
     #[serde(default)]
     pub oversampling_filter_id: Option<String>,
+    #[serde(default)]
+    pub parametric_eq: Option<ParametricEqConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

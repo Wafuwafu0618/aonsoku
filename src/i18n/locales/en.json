@@ -381,6 +381,7 @@
       "password": "Password",
       "connect": "Connect",
       "connecting": "Connecting…",
+      "skip": "Skip for now",
       "validations": {
         "url": "Please enter a valid URL.",
         "protocol": "URL must start with http:// or https://",
@@ -658,6 +659,25 @@
         "defaultGain": {
           "label": "Default Gain (dB)",
           "info": "This gain level is applied to songs that do not include ReplayGain metadata, ensuring consistent audio volume. The recommended range for gain is between -10 dB and -1 dB."
+        }
+      },
+      "parametricEq": {
+        "group": "Parametric EQ (Exclusive Preview)",
+        "description": "Import Equalizer APO / AutoEq txt files. In this phase, EQ is applied on WASAPI exclusive path only.",
+        "enabled": "Enabled",
+        "desktopOnly": "Parametric EQ import is available on desktop builds only.",
+        "summary": "{{count}} bands / preamp {{preamp}}",
+        "clear": "Clear Profile",
+        "import": {
+          "label": "Import Profile",
+          "button": "Import TXT",
+          "loading": "Importing...",
+          "success": "Parametric EQ profile imported.",
+          "warning": "Profile imported with {{count}} warning(s).",
+          "error": "Failed to import profile: {{reason}}"
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI exclusive is unavailable. Parametric EQ has been disabled."
         }
       },
       "lyrics": {

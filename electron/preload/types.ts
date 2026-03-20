@@ -36,6 +36,7 @@ export enum IpcChannels {
   DownloadProgress = 'download-progress',
   UpdateDownloaded = 'update-downloaded',
   PickLocalLibraryDirectory = 'pick-local-library-directory',
+  PickParametricEqFile = 'pick-parametric-eq-file',
   ListLocalLibraryFiles = 'list-local-library-files',
   ReadLocalLibraryFile = 'read-local-library-file',
   NativeAudioInitialize = 'native-audio-initialize',
@@ -53,6 +54,11 @@ export enum IpcChannels {
 }
 
 export interface LocalLibraryDirectoryEntry {
+  path: string
+  name: string
+}
+
+export interface ParametricEqFileEntry {
   path: string
   name: string
 }
@@ -112,6 +118,21 @@ export interface NativeAudioDeviceInfo {
   isDefault: boolean
 }
 
+export type NativeAudioParametricEqFilterType = 'PK' | 'LSC' | 'HSC'
+
+export interface NativeAudioParametricEqBand {
+  enabled: boolean
+  type: NativeAudioParametricEqFilterType
+  frequencyHz: number
+  gainDb: number
+  q: number
+}
+
+export interface NativeAudioParametricEqConfig {
+  preampDb: number
+  bands: NativeAudioParametricEqBand[]
+}
+
 export interface NativeAudioLoadRequest {
   src: string
   autoplay?: boolean
@@ -121,6 +142,7 @@ export interface NativeAudioLoadRequest {
   durationSeconds?: number
   targetSampleRateHz?: number
   oversamplingFilterId?: string
+  parametricEq?: NativeAudioParametricEqConfig
 }
 
 export interface NativeAudioErrorPayload {
@@ -184,6 +206,7 @@ export interface IAonsokuAPI {
   onDownloadProgress: (callback: (progress: ProgressInfo) => void) => void
   onUpdateDownloaded: (callback: (info: UpdateDownloadedEvent) => void) => void
   pickLocalLibraryDirectory: () => Promise<LocalLibraryDirectoryEntry | null>
+  pickParametricEqFile: () => Promise<ParametricEqFileEntry | null>
   listLocalLibraryFiles: (
     directories: string[],
   ) => Promise<LocalLibraryFileEntry[]>

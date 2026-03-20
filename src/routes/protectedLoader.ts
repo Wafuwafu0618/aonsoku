@@ -4,9 +4,12 @@ import { subsonic } from '@/service/subsonic'
 import { useAppStore } from '@/store/app.store'
 
 export async function protectedLoader() {
-  const { url, password, isServerConfigured } = useAppStore.getState().data
+  const { url, password, isServerConfigured, skipServerLogin } =
+    useAppStore.getState().data
   const hasNoUrl = !url || url === ''
   const hasNoToken = !password || password === ''
+
+  if (skipServerLogin) return null
 
   if (hasNoUrl || hasNoToken || !isServerConfigured)
     return redirect(ROUTES.SERVER_CONFIG)

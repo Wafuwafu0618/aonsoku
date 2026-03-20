@@ -30,6 +30,7 @@ interface IAppPages {
 export interface IAppData extends IServerConfig {
   authType: AuthType | null
   isServerConfigured: boolean
+  skipServerLogin: boolean
   osType: string
   logoutDialogState: boolean
   hideServer: boolean
@@ -43,6 +44,7 @@ export interface IAppActions {
   setUsername: (value: string) => void
   setPassword: (value: string) => void
   saveConfig: (data: IServerConfig) => Promise<boolean>
+  skipServerLogin: () => void
   removeConfig: () => void
   setLogoutDialogState: (value: boolean) => void
 }

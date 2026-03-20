@@ -15,6 +15,15 @@ pub fn handle_command(
     state: &mut EngineState,
     runtime: &mut AudioRuntime,
 ) -> io::Result<()> {
+    eprintln!(
+        "[NativeAudioSidecar][cmd] id={} command={} mode={} playing={} hasSource={}",
+        request.id,
+        request.command,
+        state.output_mode.as_str(),
+        state.is_playing(),
+        state.has_source()
+    );
+
     match request.command.as_str() {
         "initialize" => {
             if let Err(error) = runtime.ensure_mode_resources(state.output_mode) {
@@ -241,6 +250,26 @@ pub fn handle_command(
                         }
                     }
 
+                    let mut requested_parametric_eq = params.parametric_eq.clone();
+                    if let Some(parametric_eq) = requested_parametric_eq.as_ref() {
+                        if let Err(message) = parametric_eq.validate() {
+                            emit_command_error(
+                                &request.id,
+                                "invalid-parametric-eq",
+                                message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
+
+                        let has_enabled_bands =
+                            parametric_eq.bands.iter().any(|band| band.enabled);
+                        let has_preamp = parametric_eq.preamp_db.abs() > f32::EPSILON;
+                        if !has_enabled_bands && !has_preamp {
+                            requested_parametric_eq = None;
+                        }
+                    }
+
                     let requested_playback_rate = params.playback_rate.unwrap_or(1.0);
                     let requested_loop = params.loop_value;
                     let requested_start = params.start_at_seconds.unwrap_or(0.0);
@@ -257,6 +286,7 @@ pub fn handle_command(
                         && state.target_sample_rate_hz == params.target_sample_rate_hz
                         && state.oversampling_filter_id.as_deref()
                             == requested_oversampling_filter_id.as_deref()
+                        && state.parametric_eq == requested_parametric_eq
                         && state.loop_enabled == requested_loop
                         && (state.playback_rate - requested_playback_rate).abs() < f64::EPSILON;
 
@@ -363,6 +393,7 @@ pub fn handle_command(
                     state.duration_seconds = duration_seconds;
                     state.target_sample_rate_hz = params.target_sample_rate_hz;
                     state.oversampling_filter_id = requested_oversampling_filter_id;
+                    state.parametric_eq = requested_parametric_eq;
                     state.set_current_time(requested_start);
                     state.last_tick_instant = None;
 

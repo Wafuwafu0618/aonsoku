@@ -1,5 +1,6 @@
 #[cfg(target_os = "windows")]
 mod wasapi_probe {
+    use crate::audio::{ParametricEqConfig, ParametricEqProcessor};
     use crate::error::ExclusiveProbeError;
     use rubato::{
         Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
@@ -28,6 +29,7 @@ mod wasapi_probe {
     };
     use windows::Win32::System::Threading::{
         GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+        THREAD_PRIORITY_TIME_CRITICAL,
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,15 @@ mod wasapi_probe {
     const HQ_RESAMPLER_CHUNK_FRAMES: usize = 512;
     const HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN: f32 = 0.89;
     const EXCLUSIVE_PENDING_MULTIPLIER_PASSTHROUGH: usize = 3;
+    const EXCLUSIVE_MAX_PENDING_MULTIPLIER: usize = 8;
+    const EXCLUSIVE_MAX_REFILL_BUDGET_MULTIPLIER: usize = 4;
+    const EXCLUSIVE_PRIME_MULTIPLIER_HEAVY: usize = 2;
+    // Heavy long-lp mode prioritizes uninterrupted playback over startup latency.
+    // We keep several seconds queued, similar to HQPlayer-style deep buffering.
+    const HEAVY_LONG_LP_TARGET_BUFFER_SECONDS: f64 = 10.0;
+    const HEAVY_LONG_LP_PRIME_BUFFER_SECONDS: f64 = 6.0;
+    const HEAVY_LONG_LP_REFILL_TRIGGER_SECONDS: f64 = 4.0;
+    const HEAVY_LONG_LP_REFILL_BUDGET_SECONDS: f64 = 0.08;
 
     #[derive(Clone, Copy, Debug)]
     enum HqResamplerProfile {
@@ -104,11 +115,11 @@ mod wasapi_probe {
             }
             HqResamplerProfile::LongLp => {
                 if ratio >= 8.0 {
-                    (96, 0.955, 10)
+                    (512, 0.968, 64)
                 } else if ratio >= 4.0 {
-                    (128, 0.962, 12)
+                    (256, 0.968, 32)
                 } else {
-                    (160, 0.968, 14)
+                    (192, 0.968, 20)
                 }
             }
         };
@@ -147,9 +158,9 @@ mod wasapi_probe {
             }
             HqResamplerProfile::LongLp => {
                 if ratio >= 8.0 {
-                    24
+                    36
                 } else {
-                    20
+                    24
                 }
             }
         }
@@ -180,9 +191,9 @@ mod wasapi_probe {
             }
             HqResamplerProfile::LongLp => {
                 if ratio >= 8.0 {
-                    10
+                    14
                 } else {
-                    8
+                    10
                 }
             }
         }
@@ -205,6 +216,21 @@ mod wasapi_probe {
         }
 
         0.0
+    }
+
+    fn samples_for_duration(seconds: f64, sample_rate: u32, channels: usize) -> usize {
+        if !seconds.is_finite() || seconds <= 0.0 || sample_rate == 0 || channels == 0 {
+            return 0;
+        }
+
+        let frames = (seconds * sample_rate as f64).ceil();
+        if !frames.is_finite() || frames <= 0.0 {
+            return 0;
+        }
+
+        let frames_u64 = frames as u64;
+        let samples_u64 = frames_u64.saturating_mul(channels as u64);
+        samples_u64.min(usize::MAX as u64) as usize
     }
 
     fn audio_buffer_to_f32_vec(buffer: AudioBufferRef<'_>) -> Vec<f32> {
@@ -1287,6 +1313,7 @@ mod wasapi_probe {
         volume: f32,
         preferred_sample_rate_hz: Option<u32>,
         oversampling_filter_id: Option<String>,
+        parametric_eq: Option<ParametricEqConfig>,
         stop_receiver: Receiver<()>,
     ) -> Result<bool, ExclusiveProbeError> {
         unsafe {
@@ -1306,7 +1333,9 @@ mod wasapi_probe {
             };
 
             let playback_result = (|| -> Result<bool, ExclusiveProbeError> {
-                if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL).is_err()
+                    && SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err()
+                {
                     eprintln!(
                         "[NativeAudioSidecar] failed to raise exclusive playback thread priority"
                     );
@@ -1423,6 +1452,18 @@ mod wasapi_probe {
                                 .to_string(),
                     });
                 }
+                let use_passthrough =
+                    source_channels == channels_u16 && source_sample_rate == sample_rate;
+                let hq_profile =
+                    HqResamplerProfile::from_filter_id(oversampling_filter_id.as_deref());
+                let resample_ratio = if source_sample_rate == 0 {
+                    1.0
+                } else {
+                    sample_rate as f64 / source_sample_rate as f64
+                };
+                let heavy_long_lp_mode = !use_passthrough
+                    && matches!(hq_profile, HqResamplerProfile::LongLp)
+                    && resample_ratio >= 8.0;
 
                 eprintln!(
                     "[NativeAudioSidecar] exclusive format selected source={}ch@{}Hz -> target={}ch@{}Hz ({})",
@@ -1443,13 +1484,16 @@ mod wasapi_probe {
                     ));
                 }
 
-                let periodicity_hns = if default_period_hns > 0 {
+                let mut periodicity_hns = if default_period_hns > 0 {
                     default_period_hns
                 } else if minimum_period_hns > 0 {
                     minimum_period_hns
                 } else {
                     10_000
                 };
+                if heavy_long_lp_mode {
+                    periodicity_hns = periodicity_hns.saturating_mul(2);
+                }
 
                 let initialize_result = audio_client.Initialize(
                     Audio::AUDCLNT_SHAREMODE_EXCLUSIVE,
@@ -1488,25 +1532,22 @@ mod wasapi_probe {
                         )
                     })?;
 
-                let use_passthrough =
-                    source_channels == channels_u16 && source_sample_rate == sample_rate;
-                let hq_profile =
-                    HqResamplerProfile::from_filter_id(oversampling_filter_id.as_deref());
-                let resample_ratio = if source_sample_rate == 0 {
-                    1.0
-                } else {
-                    sample_rate as f64 / source_sample_rate as f64
-                };
                 let resample_pre_gain = if use_passthrough {
                     1.0
                 } else {
                     HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN
                 };
-                let conversion_path_label = if use_passthrough {
-                    "passthrough"
+                let mut parametric_eq_processor = parametric_eq
+                    .as_ref()
+                    .and_then(|config| ParametricEqProcessor::new(config, channels, sample_rate));
+                let mut conversion_path_label = if use_passthrough {
+                    "passthrough".to_string()
                 } else {
-                    "hq-sinc-resample"
+                    "hq-sinc-resample".to_string()
                 };
+                if parametric_eq_processor.is_some() {
+                    conversion_path_label.push_str("+parametric-eq");
+                }
                 eprintln!(
                     "[NativeAudioSidecar] exclusive conversion path: {}{}",
                     conversion_path_label,
@@ -1516,6 +1557,12 @@ mod wasapi_probe {
                         format!(" ({})", hq_profile.as_label())
                     },
                 );
+                if heavy_long_lp_mode {
+                    eprintln!(
+                        "[NativeAudioSidecar] heavy long-lp mode: exclusive period doubled for stability (ratio={:.3})",
+                        resample_ratio
+                    );
+                }
 
                 let make_sample_producer =
                     || -> Result<Box<dyn ExclusiveSampleProducer>, ExclusiveProbeError> {
@@ -1551,45 +1598,148 @@ mod wasapi_probe {
                     };
 
                 let mut sample_producer = make_sample_producer()?;
-                let mut pending_samples = Vec::<f32>::with_capacity(
-                    (buffer_frame_count as usize)
-                        .saturating_mul(channels)
-                        .saturating_mul(2),
-                );
-                let mut pending_start = 0usize;
                 let mut stream_draining = false;
                 let pending_buffer_multiplier = if use_passthrough {
                     EXCLUSIVE_PENDING_MULTIPLIER_PASSTHROUGH
                 } else {
                     hq_pending_multiplier(hq_profile, resample_ratio)
                 };
-                let target_pending_samples = (buffer_frame_count as usize)
+                let target_pending_samples_raw = (buffer_frame_count as usize)
                     .saturating_mul(channels)
                     .saturating_mul(pending_buffer_multiplier);
+                let target_pending_samples_cap = (buffer_frame_count as usize)
+                    .saturating_mul(channels)
+                    .saturating_mul(EXCLUSIVE_MAX_PENDING_MULTIPLIER);
+                let mut target_pending_samples = target_pending_samples_raw.min(target_pending_samples_cap);
+                if heavy_long_lp_mode {
+                    let heavy_target_samples = samples_for_duration(
+                        HEAVY_LONG_LP_TARGET_BUFFER_SECONDS,
+                        sample_rate,
+                        channels,
+                    );
+                    target_pending_samples = target_pending_samples.max(heavy_target_samples);
+                }
                 let refill_budget_multiplier = if use_passthrough {
                     2
                 } else {
                     hq_refill_budget_multiplier(hq_profile, resample_ratio)
                 };
-                let refill_budget_per_cycle_samples = (buffer_frame_count as usize)
+                let refill_budget_per_cycle_samples_raw = (buffer_frame_count as usize)
                     .saturating_mul(channels)
                     .saturating_mul(refill_budget_multiplier);
+                let refill_budget_per_cycle_samples_cap = (buffer_frame_count as usize)
+                    .saturating_mul(channels)
+                    .saturating_mul(EXCLUSIVE_MAX_REFILL_BUDGET_MULTIPLIER);
+                let mut refill_budget_per_cycle_samples =
+                    refill_budget_per_cycle_samples_raw.min(refill_budget_per_cycle_samples_cap);
+                if heavy_long_lp_mode {
+                    let heavy_refill_budget_samples = samples_for_duration(
+                        HEAVY_LONG_LP_REFILL_BUDGET_SECONDS,
+                        sample_rate,
+                        channels,
+                    );
+                    refill_budget_per_cycle_samples =
+                        refill_budget_per_cycle_samples.max(heavy_refill_budget_samples);
+                }
+                let refill_trigger_samples = if heavy_long_lp_mode {
+                    let heavy_refill_trigger_samples = samples_for_duration(
+                        HEAVY_LONG_LP_REFILL_TRIGGER_SECONDS,
+                        sample_rate,
+                        channels,
+                    );
+                    heavy_refill_trigger_samples
+                        .max(target_pending_samples / 3)
+                        .min(target_pending_samples)
+                } else {
+                    target_pending_samples
+                };
+                let mut pending_samples = Vec::<f32>::with_capacity(
+                    target_pending_samples.max(
+                        (buffer_frame_count as usize)
+                            .saturating_mul(channels)
+                            .saturating_mul(2),
+                    ),
+                );
+                let mut pending_start = 0usize;
+                let samples_per_second = sample_rate as f64 * channels as f64;
+                let target_pending_seconds = if samples_per_second > 0.0 {
+                    target_pending_samples as f64 / samples_per_second
+                } else {
+                    0.0
+                };
+                let refill_budget_seconds = if samples_per_second > 0.0 {
+                    refill_budget_per_cycle_samples as f64 / samples_per_second
+                } else {
+                    0.0
+                };
+                let refill_trigger_seconds = if samples_per_second > 0.0 {
+                    refill_trigger_samples as f64 / samples_per_second
+                } else {
+                    0.0
+                };
                 if !use_passthrough {
                     eprintln!(
-                        "[NativeAudioSidecar] hq-sinc buffering profile={} ratio={:.3} pending_mul={} refill_mul={}",
+                        "[NativeAudioSidecar] hq-sinc buffering profile={} ratio={:.3} pending_mul={} refill_mul={} targetPending={} (~{:.2}s, raw={}) refillBudget={} (~{:.3}s, raw={}) refillTrigger={} (~{:.2}s)",
                         hq_profile.as_label(),
                         resample_ratio,
                         pending_buffer_multiplier,
-                        refill_budget_multiplier
+                        refill_budget_multiplier,
+                        target_pending_samples,
+                        target_pending_seconds,
+                        target_pending_samples_raw,
+                        refill_budget_per_cycle_samples,
+                        refill_budget_seconds,
+                        refill_budget_per_cycle_samples_raw,
+                        refill_trigger_samples,
+                        refill_trigger_seconds
                     );
                 }
 
                 // Prime multiple buffers before Start() to reduce startup underrun/noise.
-                let prime_target_samples = target_pending_samples;
+                let prime_multiplier = if heavy_long_lp_mode {
+                    EXCLUSIVE_PRIME_MULTIPLIER_HEAVY
+                } else {
+                    1
+                };
+                let prime_target_samples = (buffer_frame_count as usize)
+                    .saturating_mul(channels)
+                    .saturating_mul(prime_multiplier)
+                    .min(target_pending_samples);
+                let prime_target_samples = if heavy_long_lp_mode {
+                    prime_target_samples
+                        .max(samples_for_duration(
+                            HEAVY_LONG_LP_PRIME_BUFFER_SECONDS,
+                            sample_rate,
+                            channels,
+                        ))
+                        .min(target_pending_samples)
+                } else {
+                    prime_target_samples
+                };
+                if !use_passthrough && prime_target_samples > 0 {
+                    let prime_target_seconds = if samples_per_second > 0.0 {
+                        prime_target_samples as f64 / samples_per_second
+                    } else {
+                        0.0
+                    };
+                    eprintln!(
+                        "[NativeAudioSidecar] exclusive startup prefill target={} samples (~{:.2}s)",
+                        prime_target_samples, prime_target_seconds
+                    );
+                }
                 while !stream_draining
                     && (pending_samples.len().saturating_sub(pending_start))
                         < prime_target_samples
                 {
+                    if stop_receiver.try_recv().is_ok() {
+                        eprintln!(
+                            "[NativeAudioSidecar][M0] exclusive-render-summary conversionPath={} underrunCount=0 endedNaturally=false (stopped during startup prefill)",
+                            conversion_path_label
+                        );
+                        audio_client.Stop().ok();
+                        audio_client.Reset().ok();
+                        return Ok(false);
+                    }
                     let available_samples = pending_samples.len().saturating_sub(pending_start);
                     let needed_samples = prime_target_samples.saturating_sub(available_samples);
                     let added_samples =
@@ -1625,8 +1775,14 @@ mod wasapi_probe {
                         initial_frames_to_write,
                         channels,
                         sample_format,
-                        &pending_samples
-                            [pending_start..pending_start + initial_samples_to_write],
+                        {
+                            let slice = &mut pending_samples
+                                [pending_start..pending_start + initial_samples_to_write];
+                            if let Some(processor) = parametric_eq_processor.as_mut() {
+                                processor.process_interleaved_in_place(slice);
+                            }
+                            slice
+                        },
                         resample_pre_gain,
                         volume,
                     );
@@ -1791,7 +1947,14 @@ mod wasapi_probe {
                         frames_to_write,
                         channels,
                         sample_format,
-                        &pending_samples[pending_start..pending_start + writable_samples],
+                        {
+                            let slice =
+                                &mut pending_samples[pending_start..pending_start + writable_samples];
+                            if let Some(processor) = parametric_eq_processor.as_mut() {
+                                processor.process_interleaved_in_place(slice);
+                            }
+                            slice
+                        },
                         resample_pre_gain,
                         volume,
                     );
@@ -1813,39 +1976,46 @@ mod wasapi_probe {
                     } else if pending_start >= 16_384
                         && pending_start >= pending_samples.len() / 2
                     {
-                        pending_samples.drain(..pending_start);
+                        let remaining = pending_samples.len().saturating_sub(pending_start);
+                        pending_samples.copy_within(pending_start.., 0);
+                        pending_samples.truncate(remaining);
                         pending_start = 0;
                     }
 
                     // Best-effort top-up after write, with bounded per-cycle work.
-                    let mut refill_budget_remaining = refill_budget_per_cycle_samples;
-                    while !stream_draining
-                        && refill_budget_remaining > 0
-                        && (pending_samples.len().saturating_sub(pending_start))
-                            < target_pending_samples
-                    {
-                        let available_samples = pending_samples.len().saturating_sub(pending_start);
-                        let needed_samples = target_pending_samples
-                            .saturating_sub(available_samples)
-                            .min(refill_budget_remaining);
-                        if needed_samples == 0 {
-                            break;
-                        }
+                    let available_before_refill =
+                        pending_samples.len().saturating_sub(pending_start);
+                    if available_before_refill < refill_trigger_samples {
+                        let mut refill_budget_remaining = refill_budget_per_cycle_samples;
+                        while !stream_draining
+                            && refill_budget_remaining > 0
+                            && (pending_samples.len().saturating_sub(pending_start))
+                                < target_pending_samples
+                        {
+                            let available_samples =
+                                pending_samples.len().saturating_sub(pending_start);
+                            let needed_samples = target_pending_samples
+                                .saturating_sub(available_samples)
+                                .min(refill_budget_remaining);
+                            if needed_samples == 0 {
+                                break;
+                            }
 
-                        let added_samples =
-                            sample_producer.fill_samples(&mut pending_samples, needed_samples)?;
-                        if added_samples > 0 {
-                            refill_budget_remaining =
-                                refill_budget_remaining.saturating_sub(added_samples);
-                            continue;
-                        }
+                            let added_samples =
+                                sample_producer.fill_samples(&mut pending_samples, needed_samples)?;
+                            if added_samples > 0 {
+                                refill_budget_remaining =
+                                    refill_budget_remaining.saturating_sub(added_samples);
+                                continue;
+                            }
 
-                        if !loop_enabled {
-                            stream_draining = true;
-                            break;
-                        }
+                            if !loop_enabled {
+                                stream_draining = true;
+                                break;
+                            }
 
-                        sample_producer = make_sample_producer()?;
+                            sample_producer = make_sample_producer()?;
+                        }
                     }
                 }
             })();
@@ -1861,6 +2031,7 @@ mod wasapi_probe {
 
 #[cfg(not(target_os = "windows"))]
 mod wasapi_probe {
+    use crate::audio::ParametricEqConfig;
     use crate::error::ExclusiveProbeError;
     use std::sync::mpsc::Receiver;
     use std::sync::Arc;
@@ -1880,6 +2051,7 @@ mod wasapi_probe {
         _volume: f32,
         _preferred_sample_rate_hz: Option<u32>,
         _oversampling_filter_id: Option<String>,
+        _parametric_eq: Option<ParametricEqConfig>,
         _stop_receiver: Receiver<()>,
     ) -> Result<bool, ExclusiveProbeError> {
         Err(ExclusiveProbeError {

@@ -1,5 +1,20 @@
 import { PlaybackBackendId } from '@/domain/playback-backend'
 
+export type PlaybackParametricEqFilterType = 'PK' | 'LSC' | 'HSC'
+
+export interface PlaybackParametricEqBand {
+  enabled: boolean
+  type: PlaybackParametricEqFilterType
+  frequencyHz: number
+  gainDb: number
+  q: number
+}
+
+export interface PlaybackParametricEqConfig {
+  preampDb: number
+  bands: PlaybackParametricEqBand[]
+}
+
 export type PlaybackStatus =
   | 'idle'
   | 'loading'
@@ -18,6 +33,7 @@ export interface PlaybackLoadRequest {
   durationSeconds?: number
   targetSampleRateHz?: number
   oversamplingFilterId?: string
+  parametricEq?: PlaybackParametricEqConfig
 }
 
 export interface PlaybackSnapshot {

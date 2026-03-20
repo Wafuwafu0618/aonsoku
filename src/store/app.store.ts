@@ -34,6 +34,7 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
         immer((set, get) => ({
           data: {
             isServerConfigured: hasValidConfig,
+            skipServerLogin: false,
             osType: '',
             url: SERVER_URL ?? '',
             username: genUser(),
@@ -217,6 +218,7 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
                     state.data.protocolVersion = serverInfo.protocolVersion
                     state.data.serverType = serverInfo.serverType
                     state.data.isServerConfigured = true
+                    state.data.skipServerLogin = false
                     state.data.extensionsSupported =
                       serverInfo.extensionsSupported
                   })
@@ -228,9 +230,16 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
               })
               return false
             },
+            skipServerLogin: () => {
+              set((state) => {
+                state.data.isServerConfigured = false
+                state.data.skipServerLogin = true
+              })
+            },
             removeConfig: () => {
               set((state) => {
                 state.data.isServerConfigured = false
+                state.data.skipServerLogin = false
                 state.data.osType = ''
                 state.data.url = ''
                 state.data.username = ''
@@ -287,6 +296,7 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
               const newState = {
                 data: {
                   isServerConfigured: true,
+                  skipServerLogin: false,
                   url: SERVER_URL as string,
                   username: genUser(),
                   password: genPassword(),

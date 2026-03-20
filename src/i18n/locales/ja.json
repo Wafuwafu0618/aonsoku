@@ -381,6 +381,7 @@
       "password": "パスワード",
       "connect": "接続",
       "connecting": "接続中…",
+      "skip": "いまはスキップ",
       "validations": {
         "url": "有効なURLを入力してください。",
         "protocol": "URLはhttp://またはhttps://で始まる必要があります",
@@ -732,6 +733,25 @@
             "label": "利用可能出力API",
             "info": "現在の環境で利用可能な出力APIです。"
           }
+        }
+      },
+      "parametricEq": {
+        "group": "パラメトリックEQ（排他プレビュー）",
+        "description": "Equalizer APO / AutoEq 形式のTXTを取り込みます。現フェーズではWASAPI排他経路のみ適用します。",
+        "enabled": "有効",
+        "desktopOnly": "パラメトリックEQのインポートはデスクトップ版のみ利用できます。",
+        "summary": "{{count}}バンド / Preamp {{preamp}}",
+        "clear": "プロファイルを削除",
+        "import": {
+          "label": "プロファイルをインポート",
+          "button": "TXTを取り込む",
+          "loading": "取り込み中...",
+          "success": "パラメトリックEQを取り込みました。",
+          "warning": "警告 {{count}} 件で取り込みました。",
+          "error": "取り込みに失敗しました: {{reason}}"
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI排他が利用できないため、パラメトリックEQを無効化しました。"
         }
       },
       "lyrics": {
