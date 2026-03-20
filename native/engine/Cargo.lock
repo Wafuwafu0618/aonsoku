@@ -37,6 +37,7 @@ dependencies = [
 name = "aonsoku-native-audio-engine"
 version = "0.1.0"
 dependencies = [
+ "cpal",
  "reqwest",
  "rodio",
  "rubato",

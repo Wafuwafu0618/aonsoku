@@ -19,6 +19,14 @@
   - seek 再初期化時は開始位置以前の PCM を破棄しつつ f32 経路を維持
   - 実機確認: `decoder backend selected=symphonia` / `decode-audit` / exclusive render summary を確認
   - 注記: exclusive 実再生ループ内部の decode は現時点では rodio のまま（計画どおり M4 で切替）
+- M3: 実装着手（2026-03-21）
+  - shared 出力 backend を `AONSOKU_NATIVE_SHARED_OUTPUT=rodio|cpal` で切替可能化（既定: `cpal`）
+  - `cpal` stream コールバックで `play/pause/seek/loop/rate/volume` を state 駆動
+  - decode 済み PCM を runtime でキャッシュし、shared 再構築時の再デコードを抑制
+- M4: 実装着手（2026-03-21）
+  - exclusive 再生ワーカーの入力を `audio_data`（rodio decode）から `DecodedPcmData` 由来 `SharedPcmTrack` へ切替
+  - WASAPI worker / HQ sinc resampler（rubato）は維持し、decode 起点のみ `decoder_backend.decode_pcm` へ移行
+  - runtime に exclusive 用 decode キャッシュを追加し、`load`/`clear` で破棄する運用へ統一
 
 ## 1. 目的
 

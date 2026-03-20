@@ -366,6 +366,8 @@ pub fn handle_command(
                     state.last_tick_instant = None;
 
                     runtime.loaded_audio = Some(LoadedAudio { data: audio_data });
+                    runtime.shared_decoded_pcm = None;
+                    runtime.exclusive_decoded_pcm = None;
 
                     if let Err(message) = runtime.rebuild_sink_from_state(state) {
                         emit_command_error(
@@ -578,8 +580,11 @@ pub fn handle_command(
                             prepared.volume = state.volume as f32;
                         }
                     }
-                } else if let Some(sink) = &runtime.sink {
-                    sink.set_volume(params.volume as f32);
+                } else {
+                    runtime.set_shared_volume(params.volume as f32);
+                    if let Some(sink) = &runtime.sink {
+                        sink.set_volume(params.volume as f32);
+                    }
                 }
 
                 emit_response_ok(&request.id, Some(command_result_ok_value()))?;

@@ -1,15 +1,14 @@
 #[cfg(target_os = "windows")]
 mod wasapi_probe {
+    use crate::audio::SharedPcmTrack;
     use crate::error::ExclusiveProbeError;
-    use rodio::{Decoder, Sample, Source};
+    use rodio::{Sample, Source};
     use rubato::{
         Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
         WindowFunction,
     };
     use std::ffi::c_void;
-    use std::io::{BufReader, Cursor};
     use std::sync::mpsc::Receiver;
-    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
     use windows::core::{Error as WinError, HRESULT};
@@ -199,6 +198,99 @@ mod wasapi_probe {
         }
 
         0.0
+    }
+
+    #[derive(Clone)]
+    struct DecodedPcmSource {
+        track: SharedPcmTrack,
+        cursor_sample: usize,
+    }
+
+    impl DecodedPcmSource {
+        fn new(track: SharedPcmTrack) -> Result<Self, ExclusiveProbeError> {
+            let channels = track.channels as usize;
+            if channels == 0 || track.sample_rate_hz == 0 {
+                return Err(ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message:
+                        "Decoded source produced invalid channel/sample-rate metadata for exclusive playback."
+                            .to_string(),
+                });
+            }
+
+            let total_frames = track.samples.len() / channels;
+            if total_frames == 0 {
+                return Err(ExclusiveProbeError {
+                    code: "source-decode-failed",
+                    message: "Decoded source produced zero PCM frames for exclusive playback."
+                        .to_string(),
+                });
+            }
+
+            Ok(Self {
+                track,
+                cursor_sample: 0,
+            })
+        }
+    }
+
+    impl Iterator for DecodedPcmSource {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let sample = self.track.samples.get(self.cursor_sample).copied()?;
+            self.cursor_sample = self.cursor_sample.saturating_add(1);
+            Some(sample)
+        }
+    }
+
+    impl Source for DecodedPcmSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            Some(self.track.samples.len().saturating_sub(self.cursor_sample))
+        }
+
+        fn channels(&self) -> u16 {
+            self.track.channels
+        }
+
+        fn sample_rate(&self) -> u32 {
+            self.track.sample_rate_hz
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            let channels = self.track.channels as usize;
+            if channels == 0 || self.track.sample_rate_hz == 0 {
+                return None;
+            }
+            let frame_count = self.track.samples.len() / channels;
+            Some(Duration::from_secs_f64(
+                frame_count as f64 / self.track.sample_rate_hz as f64,
+            ))
+        }
+    }
+
+    type ExclusivePlaybackSource =
+        rodio::source::Speed<rodio::source::SkipDuration<DecodedPcmSource>>;
+
+    fn build_exclusive_playback_source(
+        track: SharedPcmTrack,
+        start_at_seconds: f64,
+        playback_rate: f64,
+    ) -> Result<ExclusivePlaybackSource, ExclusiveProbeError> {
+        let start_at_seconds = if start_at_seconds.is_finite() {
+            start_at_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        let playback_rate = if playback_rate.is_finite() {
+            playback_rate.max(0.01)
+        } else {
+            1.0
+        };
+        let source = DecodedPcmSource::new(track)?;
+        Ok(source
+            .skip_duration(Duration::from_secs_f64(start_at_seconds))
+            .speed(playback_rate as f32))
     }
 
     struct HqResampledIterator<S>
@@ -992,7 +1084,7 @@ mod wasapi_probe {
     }
 
     pub(crate) fn run_default_exclusive_playback(
-        audio_data: Arc<[u8]>,
+        track: SharedPcmTrack,
         start_at_seconds: f64,
         playback_rate: f64,
         loop_enabled: bool,
@@ -1062,16 +1154,11 @@ mod wasapi_probe {
                     )
                 })?;
 
-                let decoder = Decoder::new(BufReader::new(Cursor::new(audio_data.clone()))).map_err(|error| {
-                    ExclusiveProbeError {
-                        code: "source-decode-failed",
-                        message: format!("Failed to decode source for exclusive playback: {error}"),
-                    }
-                })?;
-
-                let source = decoder
-                    .skip_duration(Duration::from_secs_f64(start_at_seconds.max(0.0)))
-                    .speed(playback_rate.max(0.01) as f32);
+                let source = build_exclusive_playback_source(
+                    track.clone(),
+                    start_at_seconds,
+                    playback_rate,
+                )?;
                 let source_channels = source.channels();
                 let source_sample_rate = source.sample_rate();
 
@@ -1236,17 +1323,11 @@ mod wasapi_probe {
 
                 let make_sample_producer =
                     || -> Result<Box<dyn ExclusiveSampleProducer>, ExclusiveProbeError> {
-                        let decoder = Decoder::new(BufReader::new(Cursor::new(audio_data.clone())))
-                            .map_err(|error| ExclusiveProbeError {
-                                code: "source-decode-failed",
-                                message: format!(
-                                    "Failed to decode source for exclusive playback: {error}"
-                                ),
-                            })?;
-
-                        let source = decoder
-                            .skip_duration(Duration::from_secs_f64(start_at_seconds.max(0.0)))
-                            .speed(playback_rate.max(0.01) as f32);
+                        let source = build_exclusive_playback_source(
+                            track.clone(),
+                            start_at_seconds,
+                            playback_rate,
+                        )?;
 
                         if source.channels() == 0 || source.sample_rate() == 0 {
                             return Err(ExclusiveProbeError {
@@ -1584,9 +1665,9 @@ mod wasapi_probe {
 
 #[cfg(not(target_os = "windows"))]
 mod wasapi_probe {
+    use crate::audio::SharedPcmTrack;
     use crate::error::ExclusiveProbeError;
     use std::sync::mpsc::Receiver;
-    use std::sync::Arc;
 
     pub(crate) fn probe_default_exclusive_open() -> Result<(), ExclusiveProbeError> {
         Err(ExclusiveProbeError {
@@ -1596,7 +1677,7 @@ mod wasapi_probe {
     }
 
     pub(crate) fn run_default_exclusive_playback(
-        _audio_data: Arc<[u8]>,
+        _track: SharedPcmTrack,
         _start_at_seconds: f64,
         _playback_rate: f64,
         _loop_enabled: bool,

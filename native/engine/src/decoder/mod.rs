@@ -23,6 +23,13 @@ pub struct DecodedSourceInfo {
     pub duration_seconds: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct DecodedPcmData {
+    pub source_info: DecodedSourceInfo,
+    pub samples: Arc<[f32]>,
+    pub conversion_path: &'static str,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DecodePlaybackOptions {
     pub start_at_seconds: f64,
@@ -54,6 +61,7 @@ pub trait DecodedStream {
 pub trait DecoderBackend: Send + Sync {
     fn name(&self) -> &'static str;
     fn inspect(&self, data: Arc<[u8]>) -> Result<DecodedSourceInfo, String>;
+    fn decode_pcm(&self, data: Arc<[u8]>) -> Result<DecodedPcmData, String>;
     fn decode_stream(
         &self,
         data: Arc<[u8]>,
@@ -200,6 +208,30 @@ fn build_rodio_playback_source(
     Ok(decoder
         .skip_duration(Duration::from_secs_f64(start_at_seconds))
         .speed(playback_rate as f32))
+}
+
+fn decode_with_rodio_pcm(data: Arc<[u8]>) -> Result<DecodedPcmData, String> {
+    let decoder = RodioDecoder::new(BufReader::new(Cursor::new(data)))
+        .map_err(|error| format!("Failed to decode audio data: {error}"))?;
+
+    let mut source_info = inspect_source_metadata(&decoder)?;
+    let samples: Vec<f32> = decoder.map(|sample| sample.to_f32()).collect();
+    let total_frames = if source_info.channels == 0 {
+        0
+    } else {
+        samples.len() / source_info.channels as usize
+    };
+    if source_info.sample_rate_hz > 0 {
+        source_info.duration_seconds = sanitize_duration_seconds(Some(
+            total_frames as f64 / source_info.sample_rate_hz as f64,
+        ));
+    }
+
+    Ok(DecodedPcmData {
+        source_info,
+        samples: Arc::<[f32]>::from(samples),
+        conversion_path: "rodio:decode-f32",
+    })
 }
 
 fn duration_from_codec_params(codec_params: &CodecParameters) -> Option<f64> {
@@ -382,6 +414,10 @@ impl DecoderBackend for RodioDecoderBackend {
         inspect_source_metadata(&decoder)
     }
 
+    fn decode_pcm(&self, data: Arc<[u8]>) -> Result<DecodedPcmData, String> {
+        decode_with_rodio_pcm(data)
+    }
+
     fn decode_stream(
         &self,
         data: Arc<[u8]>,
@@ -415,6 +451,22 @@ impl DecoderBackend for SymphoniaDecoderBackend {
             },
         )
         .map(|decoded| decoded.source_info)
+    }
+
+    fn decode_pcm(&self, data: Arc<[u8]>) -> Result<DecodedPcmData, String> {
+        let decoded = decode_with_symphonia(
+            data,
+            SymphoniaDecodeConfig {
+                start_at_seconds: 0.0,
+                collect_pcm: true,
+            },
+        )?;
+
+        Ok(DecodedPcmData {
+            source_info: decoded.source_info,
+            samples: Arc::<[f32]>::from(decoded.samples),
+            conversion_path: "symphonia:decode-f32",
+        })
     }
 
     fn decode_stream(
