@@ -14,3 +14,9 @@ url = "2.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.54", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Threading"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+panic = "abort"
