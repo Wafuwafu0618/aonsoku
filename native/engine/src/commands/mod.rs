@@ -300,11 +300,23 @@ pub fn handle_command(
                         }
                     };
 
+                    let inspected_source = runtime.inspect_source_info(audio_data.clone());
+                    if let Ok(source_info) = inspected_source.as_ref() {
+                        runtime.emit_decode_audit(
+                            state.output_mode,
+                            params.target_sample_rate_hz,
+                            requested_oversampling_filter_id.as_deref(),
+                            source_info,
+                            "inspect-only",
+                            None,
+                        );
+                    }
+
                     let duration_seconds = if let Some(duration) = params.duration_seconds {
                         duration
                     } else {
-                        match AudioRuntime::decode_duration_seconds(audio_data.clone()) {
-                            Ok(duration) => duration,
+                        match inspected_source {
+                            Ok(source_info) => source_info.duration_seconds,
                             Err(message) => {
                                 emit_command_error(
                                     &request.id,

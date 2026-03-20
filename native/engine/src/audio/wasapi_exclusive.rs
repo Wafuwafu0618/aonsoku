@@ -1219,13 +1219,14 @@ mod wasapi_probe {
                 } else {
                     HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN
                 };
+                let conversion_path_label = if use_passthrough {
+                    "passthrough"
+                } else {
+                    "hq-sinc-resample"
+                };
                 eprintln!(
                     "[NativeAudioSidecar] exclusive conversion path: {}{}",
-                    if use_passthrough {
-                        "passthrough"
-                    } else {
-                        "hq-sinc-resample"
-                    },
+                    conversion_path_label,
                     if use_passthrough {
                         String::new()
                     } else {
@@ -1385,8 +1386,14 @@ mod wasapi_probe {
                 })?;
 
                 let mut consecutive_empty_padding = 0usize;
+                let mut underrun_observations = 0u64;
+                let mut underrun_window_open = false;
                 loop {
                     if stop_receiver.try_recv().is_ok() {
+                        eprintln!(
+                            "[NativeAudioSidecar][M0] exclusive-render-summary conversionPath={} underrunCount={} endedNaturally=false",
+                            conversion_path_label, underrun_observations
+                        );
                         audio_client.Stop().ok();
                         audio_client.Reset().ok();
                         return Ok(false);
@@ -1400,6 +1407,11 @@ mod wasapi_probe {
                         )
                     })?;
                     if padding == 0 {
+                        if !underrun_window_open {
+                            underrun_observations =
+                                underrun_observations.saturating_add(1);
+                            underrun_window_open = true;
+                        }
                         consecutive_empty_padding += 1;
                         if consecutive_empty_padding == 16 {
                             eprintln!(
@@ -1408,12 +1420,17 @@ mod wasapi_probe {
                         }
                     } else {
                         consecutive_empty_padding = 0;
+                        underrun_window_open = false;
                     }
 
                     if stream_draining
                         && padding == 0
                         && pending_start >= pending_samples.len()
                     {
+                        eprintln!(
+                            "[NativeAudioSidecar][M0] exclusive-render-summary conversionPath={} underrunCount={} endedNaturally=true",
+                            conversion_path_label, underrun_observations
+                        );
                         audio_client.Stop().ok();
                         audio_client.Reset().ok();
                         return Ok(true);

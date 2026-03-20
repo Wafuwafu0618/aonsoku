@@ -5,6 +5,7 @@ use std::time::Duration;
 
 mod audio;
 mod commands;
+mod decoder;
 mod engine;
 mod error;
 mod protocol;

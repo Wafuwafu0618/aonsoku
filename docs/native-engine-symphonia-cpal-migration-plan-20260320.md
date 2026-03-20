@@ -1,8 +1,24 @@
 # Native Engine `symphonia + cpal` 移行計画
 
-最終更新: 2026-03-20
+最終更新: 2026-03-21
 前提: `main.rs` 責務分割リファクタ実施後
 関連: `docs/native-engine-main-rs-refactor-plan-20260320.md`
+
+## 0. 進捗（2026-03-21）
+
+- M0: 実装完了
+  - IPC 契約凍結ドキュメント: `docs/native-engine-ipc-contract-freeze-20260320.md`
+  - decode/conversion/target sample rate/underrun 計測ログを追加
+- M1: 実装完了
+  - `decoder` モジュールに `DecodedStream` 相当 I/F を追加
+  - shared runtime の decode 経路を `rodio adapter` 経由へ切替
+- M2: 実装完了（2026-03-21）
+  - `symphonia` decoder backend を追加（`AONSOKU_NATIVE_DECODER=symphonia`）
+  - `load` metadata（duration/channels/sample rate）と shared の decode 経路を `symphonia` で切替可能化
+  - `inspect` は metadata 優先で軽量化（不要な PCM 全展開を回避）
+  - seek 再初期化時は開始位置以前の PCM を破棄しつつ f32 経路を維持
+  - 実機確認: `decoder backend selected=symphonia` / `decode-audit` / exclusive render summary を確認
+  - 注記: exclusive 実再生ループ内部の decode は現時点では rodio のまま（計画どおり M4 で切替）
 
 ## 1. 目的
 
@@ -164,4 +180,3 @@ source fetch/read
 - shared/exclusive の必須操作で回帰がない
 - oversampling 経路が意図した変換のみで動作する
 - 手動確認チェックリスト更新済み
-

@@ -1,21 +1,22 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, Cursor, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{OutputStream, OutputStreamHandle, Sink};
 use url::Url;
 
 use crate::audio::{probe_default_exclusive_open, run_default_exclusive_playback};
+use crate::decoder::{
+    default_decoder_backend, DecodePlaybackOptions, DecodedSourceInfo, DecoderBackend,
+};
 use crate::engine::{EngineState, OutputMode};
 use crate::error::RuntimeError;
 
 const EXCLUSIVE_LOCK_FILE_NAME: &str = "aonsoku-native-audio-exclusive.lock";
-const DEFAULT_TRACK_DURATION_SECONDS: f64 = 300.0;
 
 #[derive(Clone)]
 pub struct LoadedAudio {
@@ -55,6 +56,7 @@ impl ExclusivePlaybackSession {
 }
 
 pub struct AudioRuntime {
+    pub decoder_backend: Arc<dyn DecoderBackend>,
     pub output_stream: Option<OutputStream>,
     pub output_handle: Option<OutputStreamHandle>,
     pub sink: Option<Sink>,
@@ -70,7 +72,14 @@ pub struct AudioRuntime {
 
 impl Default for AudioRuntime {
     fn default() -> Self {
+        let decoder_backend = default_decoder_backend();
+        eprintln!(
+            "[NativeAudioSidecar][M2] decoder backend selected={}",
+            decoder_backend.name()
+        );
+
         Self {
+            decoder_backend,
             output_stream: None,
             output_handle: None,
             sink: None,
@@ -87,6 +96,49 @@ impl Default for AudioRuntime {
 }
 
 impl AudioRuntime {
+    pub fn decoder_backend_name(&self) -> &'static str {
+        self.decoder_backend.name()
+    }
+
+    pub fn inspect_source_info(&self, data: Arc<[u8]>) -> Result<DecodedSourceInfo, String> {
+        self.decoder_backend.inspect(data)
+    }
+
+    pub fn decode_duration_seconds(&self, data: Arc<[u8]>) -> Result<f64, String> {
+        self.inspect_source_info(data).map(|info| info.duration_seconds)
+    }
+
+    pub fn emit_decode_audit(
+        &self,
+        output_mode: OutputMode,
+        target_sample_rate_hz: Option<u32>,
+        oversampling_filter_id: Option<&str>,
+        source_info: &DecodedSourceInfo,
+        conversion_path: &str,
+        underrun_count: Option<u64>,
+    ) {
+        let target_sample_rate_label = target_sample_rate_hz
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "auto".to_string());
+        let filter_label = oversampling_filter_id.unwrap_or("none");
+        let underrun_label = underrun_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+
+        eprintln!(
+            "[NativeAudioSidecar][M0] decode-audit decoder={} source={}ch@{}Hz duration={:.3}s outputMode={} targetSampleRateHz={} oversamplingFilter={} conversionPath={} underrunCount={} policy=bit-perfect-until-dsp",
+            self.decoder_backend_name(),
+            source_info.channels,
+            source_info.sample_rate_hz,
+            source_info.duration_seconds,
+            output_mode.as_str(),
+            target_sample_rate_label,
+            filter_label,
+            conversion_path,
+            underrun_label,
+        );
+    }
+
     fn try_create_exclusive_lock_file(&self) -> io::Result<File> {
         OpenOptions::new()
             .create_new(true)
@@ -479,22 +531,6 @@ impl AudioRuntime {
         Sink::try_new(handle).map_err(|error| format!("Failed to create output sink: {error}"))
     }
 
-    pub fn decode_duration_seconds(data: Arc<[u8]>) -> Result<f64, String> {
-        let decoder = Decoder::new(BufReader::new(Cursor::new(data)))
-            .map_err(|error| format!("Failed to decode audio data: {error}"))?;
-
-        let duration_seconds = decoder
-            .total_duration()
-            .map(|duration| duration.as_secs_f64())
-            .unwrap_or(DEFAULT_TRACK_DURATION_SECONDS);
-
-        if !duration_seconds.is_finite() || duration_seconds < 0.0 {
-            return Ok(DEFAULT_TRACK_DURATION_SECONDS);
-        }
-
-        Ok(duration_seconds)
-    }
-
     pub fn fetch_audio_data(src: &str) -> Result<Arc<[u8]>, String> {
         if src.starts_with("http://") || src.starts_with("https://") {
             let response = reqwest::blocking::get(src)
@@ -540,18 +576,25 @@ impl AudioRuntime {
         let sink = self.create_sink()?;
         sink.set_volume(state.volume as f32);
 
-        let decoder = Decoder::new(BufReader::new(Cursor::new(loaded_audio.data.clone())))
-            .map_err(|error| format!("Failed to decode loaded audio: {error}"))?;
+        let decode_options = DecodePlaybackOptions {
+            start_at_seconds: state.current_time_seconds,
+            playback_rate: state.playback_rate,
+            loop_enabled: state.loop_enabled,
+        };
+        let decoded_stream = self
+            .decoder_backend
+            .decode_stream(loaded_audio.data.clone(), decode_options)?;
+        let descriptor = decoded_stream.descriptor().clone();
 
-        let source = decoder
-            .skip_duration(Duration::from_secs_f64(state.current_time_seconds.max(0.0)))
-            .speed(state.playback_rate.max(0.01) as f32);
-
-        if state.loop_enabled {
-            sink.append(source.repeat_infinite());
-        } else {
-            sink.append(source);
-        }
+        self.emit_decode_audit(
+            self.active_output_mode,
+            state.target_sample_rate_hz,
+            state.oversampling_filter_id.as_deref(),
+            &descriptor.source_info,
+            descriptor.conversion_path,
+            None,
+        );
+        decoded_stream.append_to_sink(&sink)?;
 
         self.stop_sink();
         self.sink = Some(sink);
