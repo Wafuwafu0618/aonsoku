@@ -29,7 +29,9 @@ impl HqResamplerProfile {
             | "sinc-hires-lp"
             | "sinc-hires-mp"
             | "sinc-hb-l"
+            | "sinc-mega-apod"
             | "sinc-mega"
+            | "sinc-ultra-apod"
             | "sinc-ultra"
             | "fft" => Self::LongLp,
             "sinc-m-lp" | "sinc-m-lp-ext" | "sinc-m-lp-ext2" | "sinc-hb" | "fir-lp"

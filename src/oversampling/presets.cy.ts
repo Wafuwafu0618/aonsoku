@@ -12,6 +12,12 @@ describe('Oversampling presets (M6)', () => {
     )
     expect(getOversamplingFilterById('sinc-m-gauss')?.phase).to.equal('linear')
     expect(getOversamplingFilterById('sinc-xl-mp')?.phase).to.equal('minimum')
+    expect(getOversamplingFilterById('sinc-mega-apod')?.phase).to.equal(
+      'intermediate',
+    )
+    expect(getOversamplingFilterById('sinc-ultra-apod')?.phase).to.equal(
+      'intermediate',
+    )
   })
 
   it('resolves canonical presets when capability allows', () => {
@@ -28,6 +34,8 @@ describe('Oversampling presets (M6)', () => {
       'sinc-l-lp',
       'sinc-l-ip',
       'sinc-m-gauss',
+      'sinc-mega-apod',
+      'sinc-ultra-apod',
       'sinc-ultra',
     ] as const
 

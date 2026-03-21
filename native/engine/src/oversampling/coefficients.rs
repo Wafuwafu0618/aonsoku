@@ -1,3 +1,5 @@
+use rustfft::num_complex::Complex32;
+use rustfft::FftPlanner;
 use std::f64::consts::PI;
 use std::sync::Arc;
 
@@ -13,6 +15,11 @@ pub struct FilterSpec {
     pub cutoff: f64,
     pub oversampling_factor: usize,
     pub window: WindowFunction,
+    /// Positive values shift the prototype center toward causal (newer) samples.
+    /// 0.0 keeps the classic symmetric/linear baseline.
+    pub phase_shift_samples: f64,
+    /// 0.0 = pure linear-phase FIR, 1.0 = pure minimum-phase approximation.
+    pub phase_blend: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +82,9 @@ pub fn canonical_filter_id(filter_id: Option<&str>) -> &'static str {
         "sinc-hb-l" | "poly-sinc-hb-l" => "sinc-hb-l",
 
         "sinc-mega" | "sinc-m" | "poly-sinc-ext3" => "sinc-mega",
+        "sinc-mega-apod" | "sinc-m-apod" => "sinc-mega-apod",
         "sinc-ultra" | "sinc-l" => "sinc-ultra",
+        "sinc-ultra-apod" | "sinc-l-apod" => "sinc-ultra-apod",
 
         "iir" => "iir",
         "poly-1" | "polynomial-1" => "poly-1",
@@ -104,11 +113,22 @@ impl FilterSpec {
         };
 
         let (num_taps, cutoff, oversampling_factor) = profile_triplet(canonical, ratio);
+        let phase_shift_samples = match canonical {
+            "sinc-mega-apod" | "sinc-ultra-apod" => 0.0,
+            _ => 0.0,
+        };
+        let phase_blend = match canonical {
+            "sinc-mega-apod" => 0.10,
+            "sinc-ultra-apod" => 0.12,
+            _ => 0.0,
+        };
         Self {
             num_taps,
             cutoff,
             oversampling_factor,
             window,
+            phase_shift_samples,
+            phase_blend,
         }
     }
 
@@ -117,7 +137,23 @@ impl FilterSpec {
         let phases = self.oversampling_factor.max(1);
         let cutoff = self.cutoff.clamp(1.0e-6, 0.999_999);
         let total_taps = num_taps.saturating_mul(phases).max(1);
-        let prototype_center = (total_taps as f64 - 1.0) * 0.5;
+        let base_center = (total_taps as f64 - 1.0) * 0.5;
+        let max_shift = (num_taps as f64 * 0.35).max(0.0);
+        let shift_samples = self.phase_shift_samples.clamp(-max_shift, max_shift);
+        let prototype_center = base_center - shift_samples * phases as f64;
+        let mut prototype = vec![0.0_f32; total_taps];
+        for (prototype_index, value) in prototype.iter_mut().enumerate() {
+            let sample_index = (prototype_index as f64 - prototype_center) / phases as f64;
+            let sinc = normalized_sinc(2.0 * cutoff * sample_index);
+            let window = self.window_value(prototype_index, total_taps);
+            *value = (2.0 * cutoff * sinc * window) as f32;
+        }
+
+        if self.phase_blend > 0.0 {
+            let mut planner = FftPlanner::<f32>::new();
+            apply_minimum_phase_blend(&mut prototype, self.phase_blend, &mut planner);
+        }
+
         let mut matrix = Vec::with_capacity(phases);
 
         for phase in 0..phases {
@@ -126,10 +162,7 @@ impl FilterSpec {
 
             for (index, coefficient) in coefficients.iter_mut().enumerate() {
                 let prototype_index = index.saturating_mul(phases).saturating_add(phase);
-                let sample_index = (prototype_index as f64 - prototype_center) / phases as f64;
-                let sinc = normalized_sinc(2.0 * cutoff * sample_index);
-                let window = self.window_value(prototype_index, total_taps);
-                let value = 2.0 * cutoff * sinc * window;
+                let value = prototype.get(prototype_index).copied().unwrap_or(0.0) as f64;
                 *coefficient = value as f32;
                 sum += value;
             }
@@ -139,7 +172,6 @@ impl FilterSpec {
                     *coefficient = (*coefficient as f64 / sum) as f32;
                 }
             }
-
             matrix.push(coefficients);
         }
 
@@ -193,6 +225,90 @@ fn normalized_sinc(x: f64) -> f64 {
     } else {
         (PI * x).sin() / (PI * x)
     }
+}
+
+fn apply_minimum_phase_blend(
+    coefficients: &mut [f32],
+    blend: f64,
+    planner: &mut FftPlanner<f32>,
+) {
+    let blend = blend.clamp(0.0, 1.0);
+    if blend <= 0.0 || coefficients.len() < 8 {
+        return;
+    }
+
+    let minimum_phase = minimum_phase_from_fir(coefficients, planner);
+    if minimum_phase.len() != coefficients.len() {
+        return;
+    }
+
+    let keep = (1.0 - blend) as f32;
+    let mix = blend as f32;
+    for (value, minimum) in coefficients.iter_mut().zip(minimum_phase.iter()) {
+        *value = *value * keep + *minimum * mix;
+    }
+
+    let sum: f32 = coefficients.iter().copied().sum();
+    if sum.abs() > 1.0e-12 {
+        for value in coefficients {
+            *value /= sum;
+        }
+    }
+}
+
+fn minimum_phase_from_fir(coefficients: &[f32], planner: &mut FftPlanner<f32>) -> Vec<f32> {
+    let taps = coefficients.len();
+    if taps == 0 {
+        return Vec::new();
+    }
+
+    let fft_len = taps.saturating_mul(8).next_power_of_two().max(256);
+    let mut linear_spectrum = vec![Complex32::new(0.0, 0.0); fft_len];
+    for (index, value) in coefficients.iter().copied().enumerate() {
+        linear_spectrum[index].re = value;
+    }
+
+    let fft_forward = planner.plan_fft_forward(fft_len);
+    let fft_inverse = planner.plan_fft_inverse(fft_len);
+    fft_forward.process(&mut linear_spectrum);
+
+    let epsilon = 1.0e-12_f32;
+    let mut cepstrum = vec![Complex32::new(0.0, 0.0); fft_len];
+    for (dest, bin) in cepstrum.iter_mut().zip(linear_spectrum.iter()) {
+        *dest = Complex32::new(bin.norm().max(epsilon).ln(), 0.0);
+    }
+    fft_inverse.process(&mut cepstrum);
+    let inverse_scale = 1.0_f32 / fft_len as f32;
+    for value in &mut cepstrum {
+        *value *= inverse_scale;
+    }
+
+    let mut minimum_cepstrum = vec![Complex32::new(0.0, 0.0); fft_len];
+    minimum_cepstrum[0].re = cepstrum[0].re;
+    let half = fft_len / 2;
+    for index in 1..half {
+        minimum_cepstrum[index].re = 2.0 * cepstrum[index].re;
+    }
+    if fft_len % 2 == 0 {
+        minimum_cepstrum[half].re = cepstrum[half].re;
+    }
+
+    fft_forward.process(&mut minimum_cepstrum);
+    for value in &mut minimum_cepstrum {
+        let exp_real = value.re.exp();
+        let (sin_imag, cos_imag) = value.im.sin_cos();
+        *value = Complex32::new(exp_real * cos_imag, exp_real * sin_imag);
+    }
+    fft_inverse.process(&mut minimum_cepstrum);
+    for value in &mut minimum_cepstrum {
+        *value *= inverse_scale;
+    }
+
+    minimum_cepstrum
+        .iter()
+        .take(taps)
+        .map(|value| value.re)
+        .collect()
 }
 
 fn profile_triplet(filter_id: &str, ratio: f64) -> (usize, f64, usize) {
@@ -370,7 +486,25 @@ fn profile_triplet(filter_id: &str, ratio: f64) -> (usize, f64, usize) {
                 (1024, 0.974, 64)
             }
         }
+        "sinc-mega-apod" => {
+            if ratio >= 8.0 {
+                (2048, 0.974, 128)
+            } else if ratio >= 4.0 {
+                (1536, 0.974, 96)
+            } else {
+                (1024, 0.974, 64)
+            }
+        }
         "sinc-ultra" => {
+            if ratio >= 8.0 {
+                (4096, 0.976, 192)
+            } else if ratio >= 4.0 {
+                (3072, 0.976, 128)
+            } else {
+                (2048, 0.976, 96)
+            }
+        }
+        "sinc-ultra-apod" => {
             if ratio >= 8.0 {
                 (4096, 0.976, 192)
             } else if ratio >= 4.0 {
@@ -484,6 +618,8 @@ mod tests {
         assert_eq!(canonical_filter_id(Some("poly-sinc-mp")), "sinc-m-mp");
         assert_eq!(canonical_filter_id(Some("poly-sinc-long-lp")), "sinc-l-lp");
         assert_eq!(canonical_filter_id(Some("poly-sinc-ext2")), "sinc-m-lp-ext2");
+        assert_eq!(canonical_filter_id(Some("sinc-m-apod")), "sinc-mega-apod");
+        assert_eq!(canonical_filter_id(Some("sinc-l-apod")), "sinc-ultra-apod");
     }
 
     #[test]
@@ -514,6 +650,20 @@ mod tests {
         let ultra = FilterSpec::from_filter_id("sinc-ultra", 4.0);
         assert_eq!(ultra.num_taps, 3072);
         assert_eq!(ultra.oversampling_factor, 128);
+
+        let mega_apod = FilterSpec::from_filter_id("sinc-mega-apod", 8.0);
+        assert_eq!(mega_apod.num_taps, 2048);
+        assert_eq!(mega_apod.oversampling_factor, 128);
+        assert_eq!(mega_apod.window, WindowFunction::BlackmanHarris);
+        assert_eq!(mega_apod.phase_shift_samples, 0.0);
+        assert!(mega_apod.phase_blend > 0.0);
+
+        let ultra_apod = FilterSpec::from_filter_id("sinc-ultra-apod", 4.0);
+        assert_eq!(ultra_apod.num_taps, 3072);
+        assert_eq!(ultra_apod.oversampling_factor, 128);
+        assert_eq!(ultra_apod.window, WindowFunction::BlackmanHarris);
+        assert_eq!(ultra_apod.phase_shift_samples, 0.0);
+        assert!(ultra_apod.phase_blend > mega_apod.phase_blend);
     }
 
     #[test]
@@ -522,6 +672,8 @@ mod tests {
         assert_eq!(default_spec.num_taps, 44);
         assert_eq!(default_spec.oversampling_factor, 8);
         assert_eq!(default_spec.window, WindowFunction::BlackmanHarris);
+        assert_eq!(default_spec.phase_shift_samples, 0.0);
+        assert_eq!(default_spec.phase_blend, 0.0);
     }
 
     #[test]
@@ -531,6 +683,8 @@ mod tests {
             cutoff: 0.925,
             oversampling_factor: 7,
             window: WindowFunction::BlackmanHarris,
+            phase_shift_samples: 0.0,
+            phase_blend: 0.0,
         };
         let coefficients = spec.compute_polyphase_coefficients();
         assert_eq!(coefficients.len(), 7);
