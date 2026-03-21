@@ -15,15 +15,33 @@ export let mainWindow: BrowserWindow | null = null
 
 const { defaultWidth, defaultHeight, defaultBgColor } = electron.window
 
+function applyWindowTransparencyMaterial(window: BrowserWindow) {
+  if (platform.isWindows) {
+    ;(
+      window as BrowserWindow & {
+        setBackgroundMaterial?: (
+          material: 'auto' | 'none' | 'mica' | 'acrylic' | 'tabbed',
+        ) => void
+      }
+    ).setBackgroundMaterial?.('acrylic')
+  }
+
+  if (platform.isMacOS) {
+    window.setVibrancy('under-window')
+  }
+}
+
 export function createWindow(): void {
   const backgroundColor = colorsState.get('bgColor') ?? defaultBgColor
+  const useTransparentWindow = platform.isWindows || platform.isMacOS
 
   mainWindow = new StatefulBrowserWindow({
     width: defaultWidth,
     height: defaultHeight,
     minWidth: defaultWidth,
     minHeight: defaultHeight,
-    backgroundColor,
+    backgroundColor: useTransparentWindow ? '#00000000' : backgroundColor,
+    transparent: useTransparentWindow,
     supportMaximize: true,
     show: false,
     autoHideMenuBar: true,
@@ -39,6 +57,8 @@ export function createWindow(): void {
       sandbox: false,
     },
   })
+
+  applyWindowTransparencyMaterial(mainWindow)
 
   createTray()
   setupEvents(mainWindow)

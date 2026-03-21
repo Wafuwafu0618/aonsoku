@@ -12,6 +12,8 @@ cpal = "0.15"
 symphonia = { version = "0.5", features = ["all-codecs", "all-formats"] }
 url = "2.5"
 rustfft = "6.2"
+crossterm = "0.28"
+ratatui = "0.28"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.54", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Threading"] }

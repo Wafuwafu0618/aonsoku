@@ -25,8 +25,11 @@ export function setTitleBarColors(transparent = false): void {
   const styles = getComputedStyle(root)
 
   if (!transparent) {
+    const isMinatoWave = root.classList.contains('minato-wave')
     symbol = hslToHsla(styles.getPropertyValue('--foreground').trim())
-    color = hslToHsla(styles.getPropertyValue('--background').trim())
+    color = isMinatoWave
+      ? '#00000000'
+      : hslToHsla(styles.getPropertyValue('--background').trim(), 1)
   }
 
   const bgColor = hslToHex(styles.getPropertyValue('--background').trim())

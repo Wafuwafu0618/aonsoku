@@ -464,4 +464,29 @@
     --destructive-foreground: 0 0% 100%;
     --ring: 43 59% 81%;
   }
+
+  .minato-wave {
+    /* Based on icon palette:
+       #F0E6F7 #655D91 #E3C9FF #3E3856 #FFFFFF #DCBAFF */
+    --background: 252 21% 28%;
+    --background-foreground: 252 21% 24%;
+    --foreground: 275 52% 94%;
+    --muted: 252 17% 32%;
+    --muted-foreground: 270 35% 84%;
+    --popover: 252 21% 22%;
+    --popover-foreground: 0 0% 100%;
+    --card: 252 21% 24%;
+    --card-foreground: 0 0% 100%;
+    --border: 252 20% 44%;
+    --input: 252 20% 40%;
+    --primary: 249 22% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 270 100% 86%;
+    --secondary-foreground: 252 21% 22%;
+    --accent: 269 100% 89%;
+    --accent-foreground: 252 21% 22%;
+    --destructive: 0 74% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --ring: 269 100% 89%;
+  }
 }

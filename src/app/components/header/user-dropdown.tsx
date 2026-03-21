@@ -50,7 +50,10 @@ export function UserDropdown() {
             </AvatarFallback>
           </Avatar>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align={alignPosition} className="min-w-64">
+        <DropdownMenuContent
+          align={alignPosition}
+          className="user-menu-content min-w-64"
+        >
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-2">
               <p className="text-sm font-medium leading-none">{username}</p>

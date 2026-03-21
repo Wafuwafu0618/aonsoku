@@ -31,6 +31,7 @@
   - `impulseAnalyses[].stopbandAttenuationDb`
   - `impulseAnalyses[].passbandPeakDb`
   - `impulseAnalyses[].impulseWavPath`（`--write-impulse-wav`時）
+  - `impulseAnalyses[].impulsePlotPath`（`--write-impulse-plot`時、SVG）
 - 任意で各ケースのWAVを書き出し
 
 ## 実行方法
@@ -48,6 +49,21 @@ cargo run --release --bin offline-oversampling-lab -- \
 
 標準出力に `report.json` 相当のJSONを表示し、`--output-dir` を指定すると同内容を `report.json` に保存します。
 
+## TUI実行方法
+
+PowerShellコマンドを毎回打たずに、キー操作で実行したい場合:
+
+```bash
+cargo run --release --bin offline-oversampling-tui
+```
+
+- `↑/↓`: 項目移動
+- `Enter`: 項目確定/切替
+- `Space`: フィルタ選択画面でON/OFF切替
+- `a`: フィルタ全選択
+- `n`: フィルタ全解除
+- `q`: 終了
+
 ## オプション
 
 - `--src <path-or-url>`: 入力音源（必須）
@@ -64,6 +80,7 @@ cargo run --release --bin offline-oversampling-lab -- \
 - `--analyze-impulse`: フィルタごとのインパルス応答を解析
 - `--impulse-frames <n>`: インパルス入力長（既定 `65536`）
 - `--write-impulse-wav`: インパルス応答WAVを出力（`--analyze-impulse` と `--output-dir` 必須）
+- `--write-impulse-plot`: 周波数特性グラフ画像（SVG）を出力（`--analyze-impulse` と `--output-dir` 必須）
 - `--stopband-start-hz <hz>`: ストップバンド評価開始周波数（未指定時は自動）
 - `--force-engine <auto|fft-ola|short-fir-direct|rubato-sinc>`: オーバーサンプリング実行エンジンを強制（既定 `auto`）
 
@@ -86,7 +103,8 @@ cargo run --release --bin offline-oversampling-lab -- \
   --output-dir ./offline-lab \
   --self-null \
   --analyze-impulse \
-  --write-impulse-wav
+  --write-impulse-wav \
+  --write-impulse-plot
 ```
 
 - フィルタ間の差分: `comparisons[].residualRmsRelativeDbGainMatched`（小さいほど近い）

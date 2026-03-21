@@ -8,16 +8,17 @@ import { ISidebarItem } from '@/app/layout/sidebar'
 export function SidebarMainItem({ item }: { item: ISidebarItem }) {
   const { t } = useTranslation()
   const { isActive } = useRouteIsActive()
+  const active = isActive(item.route)
 
   return (
     <MainSidebarMenuButton
       asChild
       tooltip={t(item.title)}
-      className={clsx(isActive(item.route) && 'bg-accent')}
+      isActive={active}
     >
       <Link
         to={item.route}
-        className={clsx(isActive(item.route) && 'pointer-events-none')}
+        className={clsx(active && 'pointer-events-none')}
       >
         <item.icon />
         {t(item.title)}

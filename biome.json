@@ -141,6 +141,12 @@
   },
   "overrides": [
     {
+      "includes": ["src/cypress/**/*.ts", "src/cypress/**/*.tsx"],
+      "javascript": {
+        "globals": ["Cypress", "cy"]
+      }
+    },
+    {
       "includes": ["*.ts", "*.tsx", "*.mts", "*.cts"],
       "linter": {
         "rules": {

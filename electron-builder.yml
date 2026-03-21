@@ -1,5 +1,5 @@
-appId: com.victoralvesf.aonsoku
-productName: Aonsoku
+appId: com.victoralvesf.minato
+productName: Minato
 copyright: Copyright © 2026 Victor Alves
 icon: ./build/icon.ico
 artifactName: '${productName}-v${version}-${os}-${arch}.${ext}'
@@ -18,7 +18,7 @@ extraResources:
     to: resources
 
 win:
-  executableName: Aonsoku
+  executableName: Minato
   target:
     - target: nsis
       arch:

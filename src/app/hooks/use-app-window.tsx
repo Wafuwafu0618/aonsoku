@@ -85,6 +85,11 @@ export function useAppWindow(): AppWindowType {
     }
   }, [])
 
+  useEffect(() => {
+    const root = window.document.documentElement
+    root.classList.toggle('window-maximized', isMaximized)
+  }, [isMaximized])
+
   const enterFullscreenWindow = async () => {
     if (!isDesktop()) return
 

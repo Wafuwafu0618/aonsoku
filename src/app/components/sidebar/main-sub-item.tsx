@@ -11,16 +11,14 @@ import { ISidebarItem } from '@/app/layout/sidebar'
 export function SidebarMainSubItem({ item }: { item: ISidebarItem }) {
   const { t } = useTranslation()
   const { isActive } = useRouteIsActive()
+  const active = isActive(item.route)
 
   return (
     <MainSidebarMenuSubItem>
-      <MainSidebarMenuSubButton
-        asChild
-        className={clsx(isActive(item.route) && 'bg-accent')}
-      >
+      <MainSidebarMenuSubButton asChild isActive={active}>
         <Link
           to={item.route}
-          className={clsx(isActive(item.route) && 'pointer-events-none')}
+          className={clsx(active && 'pointer-events-none')}
         >
           {t(item.title)}
         </Link>

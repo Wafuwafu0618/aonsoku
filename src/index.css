@@ -259,6 +259,225 @@ svg#bars .eq-bar {
   @apply transform-gpu will-change-transform origin-top;
 }
 
+/* Minato Wave: purple glass look */
+.minato-wave,
+.minato-wave body {
+  background: hsl(270 100% 98% / 0.06) !important;
+}
+
+.minato-wave body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      1600px 920px at 8% -22%,
+      hsl(269 100% 89% / 0.1),
+      transparent 54%
+    ),
+    radial-gradient(
+      1400px 920px at 98% 2%,
+      hsl(270 100% 86% / 0.08),
+      transparent 52%
+    ),
+    radial-gradient(
+      1000px 700px at 50% 42%,
+      hsl(300 100% 97% / 0.1),
+      transparent 68%
+    );
+}
+
+.minato-wave #root {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+/* Keep the app base truly transparent */
+.minato-wave [data-slot='sidebar-wrapper'],
+.minato-wave [data-slot='sidebar-inset'],
+.minato-wave #main-scroll-area,
+.minato-wave #main-scroll-area > [data-radix-scroll-area-viewport],
+.minato-wave #scroll-viewport,
+.minato-wave main {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Glass surfaces */
+.minato-wave [data-slot='sidebar-inner'],
+.minato-wave header,
+.minato-wave footer,
+.minato-wave .main-drawer {
+  background: hsl(270 100% 98% / 0.08) !important;
+  backdrop-filter: blur(46px) saturate(180%) brightness(1.1);
+  -webkit-backdrop-filter: blur(46px) saturate(180%) brightness(1.1);
+  background-clip: padding-box;
+}
+
+.minato-wave [class*='bg-background-foreground'] {
+  background: hsl(270 100% 98% / 0.06) !important;
+}
+
+.minato-wave [class*='bg-background'],
+.minato-wave [class*='bg-card'],
+.minato-wave [class*='bg-popover'],
+.minato-wave [class*='bg-muted'] {
+  background: hsl(270 100% 98% / 0.05) !important;
+}
+
+.minato-wave [class*='to-background-foreground'],
+.minato-wave [class*='from-background-foreground'] {
+  --tw-gradient-from: hsl(270 100% 98% / 0.06) !important;
+  --tw-gradient-to: hsl(270 100% 98% / 0.06) !important;
+}
+
+/* Re-assert transparent app base after generic bg-* overrides */
+.minato-wave [data-slot='sidebar-wrapper'],
+.minato-wave [data-slot='sidebar-inset'],
+.minato-wave #main-scroll-area,
+.minato-wave #main-scroll-area > [data-radix-scroll-area-viewport],
+.minato-wave #scroll-viewport,
+.minato-wave main {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.minato-wave [class*='bg-background/'],
+.minato-wave [class*='bg-card/'],
+.minato-wave [class*='bg-popover/'],
+.minato-wave [class*='bg-muted/'] {
+  backdrop-filter: blur(34px) saturate(160%) brightness(1.08);
+  -webkit-backdrop-filter: blur(34px) saturate(160%) brightness(1.08);
+}
+
+/* Keep signal-path panel readable (do not make it fully transparent) */
+.minato-wave .signal-path-popover-panel {
+  background: hsl(258 26% 30% / 0.68) !important;
+  border-color: hsl(258 28% 66% / 0.42) !important;
+  backdrop-filter: blur(24px) saturate(170%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(170%) brightness(1.08) !important;
+  box-shadow:
+    0 10px 28px hsl(252 35% 10% / 0.28),
+    inset 0 1px 0 hsl(0 0% 100% / 0.08);
+}
+
+.minato-wave .signal-path-popover-panel p,
+.minato-wave .signal-path-popover-panel span,
+.minato-wave .signal-path-popover-panel li {
+  color: hsl(0 0% 98% / 0.94);
+}
+
+.minato-wave .signal-path-popover-panel .text-muted-foreground {
+  color: hsl(0 0% 95% / 0.78) !important;
+}
+
+.minato-wave .signal-path-popover-panel .text-primary {
+  color: hsl(266 100% 89% / 0.98) !important;
+}
+
+.minato-wave .signal-path-popover-panel .text-emerald-500 {
+  color: hsl(152 85% 78%) !important;
+}
+
+.minato-wave .signal-path-popover-panel .text-indigo-500 {
+  color: hsl(242 100% 86%) !important;
+}
+
+.minato-wave .signal-path-popover-panel .text-amber-500 {
+  color: hsl(42 100% 78%) !important;
+}
+
+.minato-wave .signal-path-popover-panel .text-red-500 {
+  color: hsl(0 100% 82%) !important;
+}
+
+/* Keep settings dialog readable */
+.minato-wave .settings-dialog-surface {
+  background: hsl(258 24% 24% / 0.82) !important;
+  border-color: hsl(258 28% 72% / 0.34) !important;
+  box-shadow:
+    0 20px 60px hsl(252 35% 8% / 0.42),
+    inset 0 1px 0 hsl(0 0% 100% / 0.1);
+  backdrop-filter: blur(26px) saturate(165%) brightness(1.06) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(165%) brightness(1.06) !important;
+}
+
+.minato-wave .settings-dialog-surface [data-slot='sidebar-inner'],
+.minato-wave .settings-dialog-surface .bg-background-foreground {
+  background: hsl(258 22% 28% / 0.72) !important;
+}
+
+/* Keep account dropdown menu readable */
+.minato-wave .user-menu-content {
+  background: hsl(258 24% 26% / 0.86) !important;
+  border-color: hsl(258 30% 74% / 0.36) !important;
+  box-shadow:
+    0 14px 36px hsl(252 35% 10% / 0.35),
+    inset 0 1px 0 hsl(0 0% 100% / 0.1);
+  backdrop-filter: blur(20px) saturate(160%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(160%) brightness(1.08) !important;
+}
+
+/* Brighten media control icons/buttons for readability */
+.minato-wave footer .text-secondary-foreground {
+  color: hsl(0 0% 98% / 0.92) !important;
+}
+
+.minato-wave footer .fill-secondary-foreground {
+  fill: hsl(0 0% 98% / 0.92) !important;
+}
+
+.minato-wave footer .text-secondary {
+  color: hsl(0 0% 98% / 0.95) !important;
+}
+
+.minato-wave footer .fill-secondary {
+  fill: hsl(0 0% 98% / 0.95) !important;
+}
+
+.minato-wave footer button.rounded-full {
+  color: hsl(0 0% 98% / 0.9);
+}
+
+.minato-wave footer button.rounded-full:hover {
+  color: hsl(0 0% 100% / 0.98) !important;
+}
+
+/* Improve contrast for selected sidebar items */
+.minato-wave [data-sidebar='menu-button'][data-active='true'],
+.minato-wave [data-sidebar='menu-sub-button'][data-active='true'],
+.minato-wave [data-slot='sidebar-inner'] .bg-accent {
+  background: hsl(252 28% 40% / 0.92) !important;
+  color: hsl(0 0% 100%) !important;
+}
+
+.minato-wave [data-sidebar='menu-button'][data-active='true'] svg,
+.minato-wave [data-sidebar='menu-sub-button'][data-active='true'] svg {
+  color: hsl(0 0% 100%) !important;
+}
+
+.minato-wave * {
+  border-color: hsl(var(--border) / 0.36);
+}
+
+/* Reduce heavy effects while maximized to avoid resize flicker on Windows */
+.minato-wave.window-maximized [data-slot='sidebar-inner'],
+.minato-wave.window-maximized header,
+.minato-wave.window-maximized footer,
+.minato-wave.window-maximized .main-drawer {
+  backdrop-filter: blur(22px) saturate(135%) brightness(1.04) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(135%) brightness(1.04) !important;
+}
+
+.minato-wave.window-maximized .default-gradient {
+  background-image: none !important;
+}
+
 svg#bars .eq-bar--1 {
   animation: eq-1 0.6s infinite 0s;
 }

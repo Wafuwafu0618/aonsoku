@@ -1,4 +1,3 @@
-import randomCSSHexColor from '@chriscodesthings/random-css-hex-color'
 import clsx from 'clsx'
 import { useState } from 'react'
 import { LazyLoadImage } from 'react-lazy-load-image-component'
@@ -14,7 +13,6 @@ import { CustomLightBox } from '@/app/components/lightbox'
 import { cn } from '@/lib/utils'
 import { CoverArt } from '@/types/coverArtType'
 import { IFeaturedArtist } from '@/types/responses/artist'
-import { getAverageColor } from '@/utils/getAverageColor'
 import { getTextSizeClass } from '@/utils/getTextSizeClass'
 
 interface ImageHeaderProps {
@@ -45,35 +43,6 @@ export default function ImageHeader({
   isPlaylist = false,
 }: ImageHeaderProps) {
   const [open, setOpen] = useState(false)
-  const [bgColor, setBgColor] = useState('')
-
-  function getImage() {
-    return document.getElementById('cover-art-image') as HTMLImageElement
-  }
-
-  async function handleLoadImage() {
-    const img = getImage()
-    if (!img) return
-
-    let color = randomCSSHexColor(true)
-
-    try {
-      color = (await getAverageColor(img)).hex
-    } catch (_) {
-      console.warn(
-        'handleLoadImage: unable to get image color. Using a random color.',
-      )
-    }
-
-    setBgColor(color)
-  }
-
-  function handleError() {
-    const img = getImage()
-    if (!img) return
-
-    img.crossOrigin = null
-  }
 
   const hasMultipleArtists = artists ? artists.length > 1 : false
 
@@ -94,7 +63,6 @@ export default function ImageHeader({
               'w-full px-8 py-6 flex gap-4 absolute inset-0',
               'bg-gradient-to-b from-background/20 to-background/50',
             )}
-            style={{ backgroundColor: bgColor }}
           >
             <div
               className={cn(
@@ -108,15 +76,11 @@ export default function ImageHeader({
               <LazyLoadImage
                 key={coverArtId}
                 effect="opacity"
-                crossOrigin="anonymous"
-                id="cover-art-image"
                 src={src}
                 alt={coverArtAlt}
                 className="aspect-square object-cover w-full h-full cursor-pointer"
                 width="100%"
                 height="100%"
-                onLoad={handleLoadImage}
-                onError={handleError}
                 onClick={() => setOpen(true)}
               />
             </div>
@@ -171,11 +135,7 @@ export default function ImageHeader({
             </div>
           </div>
 
-          {isLoading ? (
-            <ImageHeaderEffect className="bg-muted-foreground" />
-          ) : (
-            <ImageHeaderEffect style={{ backgroundColor: bgColor }} />
-          )}
+          {isLoading ? <ImageHeaderEffect className="bg-muted-foreground" /> : <ImageHeaderEffect />}
 
           <CustomLightBox
             open={open}

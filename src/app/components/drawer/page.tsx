@@ -14,20 +14,30 @@ import {
   useQueueState,
   useSongColor,
 } from '@/store/player.store'
+import { useTheme } from '@/store/theme.store'
+import { Theme } from '@/types/themeContext'
 import { hexToRgba } from '@/utils/getAverageColor'
 
 export function MainDrawerPage() {
   const { currentSongColor, useSongColorOnQueue, currentSongColorIntensity } =
     useSongColor()
+  const { theme } = useTheme()
   const { mainDrawerState, closeDrawer } = useMainDrawerState()
   const { queueState } = useQueueState()
   const { lyricsState } = useLyricsState()
+  const isMinatoWave = theme === Theme.MinatoWave
 
   const backgroundColor = useMemo(() => {
-    if (!useSongColorOnQueue || !currentSongColor) return undefined
+    if (isMinatoWave || !useSongColorOnQueue || !currentSongColor)
+      return undefined
 
     return hexToRgba(currentSongColor, currentSongColorIntensity)
-  }, [currentSongColor, useSongColorOnQueue, currentSongColorIntensity])
+  }, [
+    currentSongColor,
+    useSongColorOnQueue,
+    currentSongColorIntensity,
+    isMinatoWave,
+  ])
 
   return (
     <Drawer
@@ -48,7 +58,7 @@ export function MainDrawerPage() {
           className={clsx(
             'flex flex-col w-full h-content',
             'transition-[background-image,background-color] duration-1000',
-            currentSongColor && 'default-gradient',
+            currentSongColor && !isMinatoWave && 'default-gradient',
           )}
           style={{ backgroundColor }}
         >

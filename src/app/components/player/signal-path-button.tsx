@@ -74,7 +74,9 @@ export function PlayerSignalPathButton({
       <PopoverContent
         side="top"
         align="center"
-        className={cn('w-[min(92vw,380px)] p-4 !pointer-events-auto')}
+        className={cn(
+          'signal-path-popover-panel w-[min(92vw,380px)] p-4 !pointer-events-auto',
+        )}
         data-testid="player-signal-path-popover"
       >
         <div className="flex flex-col gap-1">

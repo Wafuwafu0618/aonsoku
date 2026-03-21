@@ -8,7 +8,7 @@
   },
   "main": "./out/main/index.js",
   "type": "module",
-  "productName": "Aonsoku",
+  "productName": "Minato",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

@@ -15,8 +15,14 @@ export function setDesktopTitleBarColors(transparent = false) {
   const styles = getComputedStyle(root)
 
   if (!transparent) {
+    const isMinatoWave = root.classList.contains('minato-wave')
     symbol = hslToHsla(styles.getPropertyValue('--foreground').trim())
-    color = hslToHsla(styles.getPropertyValue('--background').trim())
+
+    // Keep native Windows caption buttons visually aligned with the themed
+    // header by letting the web header paint the background in Minato Wave.
+    color = isMinatoWave
+      ? '#00000000'
+      : hslToHsla(styles.getPropertyValue('--background').trim(), 1)
   }
 
   const bgColor = hslToHex(styles.getPropertyValue('--background').trim())

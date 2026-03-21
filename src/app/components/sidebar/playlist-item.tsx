@@ -17,6 +17,7 @@ const MemoPlaylistOptions = memo(PlaylistOptions)
 
 export function SidebarPlaylistItem({ playlist }: { playlist: Playlist }) {
   const { isOnPlaylist } = useRouteIsActive()
+  const active = isOnPlaylist(playlist.id)
 
   return (
     <MainSidebarMenuItem>
@@ -31,14 +32,13 @@ export function SidebarPlaylistItem({ playlist }: { playlist: Playlist }) {
       >
         <MainSidebarMenuButton
           asChild
-          className={clsx(
-            isOnPlaylist(playlist.id) && 'cursor-default bg-accent',
-          )}
+          isActive={active}
+          className={clsx(active && 'cursor-default')}
         >
           <Link
             to={ROUTES.PLAYLIST.PAGE(playlist.id)}
             onClick={(e) => {
-              if (isOnPlaylist(playlist.id)) {
+              if (active) {
                 e.preventDefault()
               }
             }}
