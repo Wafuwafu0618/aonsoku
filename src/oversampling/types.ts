@@ -1,4 +1,37 @@
-export const OVERSAMPLING_FILTER_IDS = [
+export const OVERSAMPLING_CANONICAL_FILTER_IDS = [
+  'bypass',
+  'fir-lp',
+  'fir-mp',
+  'fir-asym',
+  'fir-minring-lp',
+  'fir-minring-mp',
+  'fft',
+  'sinc-s-mp',
+  'sinc-m-mp',
+  'sinc-m-lp',
+  'sinc-l-lp',
+  'sinc-l-mp',
+  'sinc-l-ip',
+  'sinc-m-lp-ext',
+  'sinc-m-lp-ext2',
+  'sinc-xl-lp',
+  'sinc-xl-mp',
+  'sinc-m-gauss',
+  'sinc-l-gauss',
+  'sinc-xl-gauss',
+  'sinc-xl-gauss-apod',
+  'sinc-hires-lp',
+  'sinc-hires-mp',
+  'sinc-hb',
+  'sinc-hb-l',
+  'sinc-mega',
+  'sinc-ultra',
+  'iir',
+  'poly-1',
+  'poly-2',
+] as const
+
+export const OVERSAMPLING_LEGACY_FILTER_IDS = [
   'poly-sinc-short-mp',
   'poly-sinc-mp',
   'poly-sinc-lp',
@@ -7,20 +40,59 @@ export const OVERSAMPLING_FILTER_IDS = [
   'poly-sinc-gauss',
   'poly-sinc-ext2',
 ] as const
+
+export const OVERSAMPLING_FILTER_IDS = [
+  ...OVERSAMPLING_CANONICAL_FILTER_IDS,
+  ...OVERSAMPLING_LEGACY_FILTER_IDS,
+] as const
+
+export type OversamplingCanonicalFilterId =
+  (typeof OVERSAMPLING_CANONICAL_FILTER_IDS)[number]
+
+export type OversamplingLegacyFilterId =
+  (typeof OVERSAMPLING_LEGACY_FILTER_IDS)[number]
 
 export type OversamplingFilterId = (typeof OVERSAMPLING_FILTER_IDS)[number]
 
 export const OVERSAMPLING_PRESET_IDS = [
-  'poly-sinc-short-mp',
-  'poly-sinc-mp',
-  'poly-sinc-lp',
-  'poly-sinc-long-lp',
-  'poly-sinc-long-ip',
-  'poly-sinc-gauss',
-  'poly-sinc-ext2',
+  'fir-lp',
+  'fir-mp',
+  'fir-asym',
+  'fir-minring-lp',
+  'fir-minring-mp',
+  'fft',
+  'sinc-s-mp',
+  'sinc-m-mp',
+  'sinc-m-lp',
+  'sinc-l-lp',
+  'sinc-l-mp',
+  'sinc-l-ip',
+  'sinc-m-lp-ext',
+  'sinc-m-lp-ext2',
+  'sinc-xl-lp',
+  'sinc-xl-mp',
+  'sinc-m-gauss',
+  'sinc-l-gauss',
+  'sinc-xl-gauss',
+  'sinc-xl-gauss-apod',
+  'sinc-hires-lp',
+  'sinc-hires-mp',
+  'sinc-hb',
+  'sinc-hb-l',
+  'sinc-mega',
+  'sinc-ultra',
+  'iir',
+  'poly-1',
+  'poly-2',
 ] as const
 
-export type OversamplingPresetId = (typeof OVERSAMPLING_PRESET_IDS)[number]
+export const OVERSAMPLING_LEGACY_PRESET_IDS = [
+  ...OVERSAMPLING_LEGACY_FILTER_IDS,
+] as const
+
+export type OversamplingPresetId =
+  | (typeof OVERSAMPLING_PRESET_IDS)[number]
+  | (typeof OVERSAMPLING_LEGACY_PRESET_IDS)[number]
 
 export const OVERSAMPLING_OUTPUT_APIS = [
   'wasapi-shared',

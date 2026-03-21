@@ -6,9 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
-};
 use serde::Serialize;
 use url::Url;
 
@@ -16,8 +13,14 @@ use url::Url;
 mod parametric_eq;
 #[path = "../decoder/mod.rs"]
 mod decoder;
+#[path = "../oversampling/mod.rs"]
+mod oversampling;
 
 use decoder::{DecodedPcmData, DecodedSourceInfo};
+use oversampling::{
+    canonical_filter_id as canonical_engine_filter_id, create_filter_with_engine_override,
+    OversamplingEngineOverride, RubatoFilterInfo,
+};
 use parametric_eq::{ParametricEqConfig, ParametricEqProcessor};
 
 const HQ_RESAMPLER_CHUNK_FRAMES: usize = 512;
@@ -25,6 +28,7 @@ const HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN: f32 = 0.89;
 const DEFAULT_MAX_LAG_FRAMES: usize = 2048;
 const DEFAULT_LAG_WINDOW_FRAMES: usize = 48_000;
 const DEFAULT_IMPULSE_FRAMES: usize = 65_536;
+const MAX_IMPULSE_FFT_SIZE: usize = 1 << 21; // 2,097,152
 
 #[derive(Debug, Clone)]
 struct CliArgs {
@@ -43,6 +47,7 @@ struct CliArgs {
     impulse_frames: usize,
     write_impulse_wav: bool,
     stopband_start_hz: Option<f64>,
+    force_engine_override: OversamplingEngineOverride,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +57,7 @@ struct RenderedCase {
     profile_label: Option<String>,
     output_sample_rate_hz: u32,
     channels: u16,
+    oversampling_engine: Option<String>,
     samples: Vec<f32>,
     processing_time_ms: f64,
     wav_path: Option<String>,
@@ -65,6 +71,7 @@ struct CaseMetrics {
     profile_label: Option<String>,
     output_sample_rate_hz: u32,
     channels: u16,
+    oversampling_engine: Option<String>,
     frames: usize,
     duration_seconds: f64,
     processing_time_ms: f64,
@@ -120,6 +127,7 @@ struct ImpulseAnalysisMetrics {
     profile_label: Option<String>,
     output_sample_rate_hz: u32,
     channels: u16,
+    oversampling_engine: Option<String>,
     impulse_input_frames: usize,
     impulse_output_frames: usize,
     fft_size: usize,
@@ -128,8 +136,13 @@ struct ImpulseAnalysisMetrics {
     passband_peak_db: f64,
     stopband_start_hz: Option<f64>,
     stopband_end_hz: Option<f64>,
+    stopband_peak_hz: Option<f64>,
     stopband_peak_db: Option<f64>,
     stopband_attenuation_db: Option<f64>,
+    stopband_median_db: Option<f64>,
+    stopband_p95_db: Option<f64>,
+    stopband_median_attenuation_db: Option<f64>,
+    stopband_p95_attenuation_db: Option<f64>,
     impulse_wav_path: Option<String>,
 }
 
@@ -150,88 +163,6 @@ struct OfflineLabReport {
     self_nulls: Vec<SelfNullMetrics>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     impulse_analyses: Vec<ImpulseAnalysisMetrics>,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum HqResamplerProfile {
-    ShortMp,
-    Mp,
-    Lp,
-    LongLp,
-}
-
-impl HqResamplerProfile {
-    fn from_filter_id(filter_id: Option<&str>) -> (Self, bool) {
-        match filter_id {
-            Some("poly-sinc-short-mp") => (Self::ShortMp, true),
-            Some("poly-sinc-mp") => (Self::Mp, true),
-            Some("poly-sinc-lp") => (Self::Lp, true),
-            Some("poly-sinc-long-lp") | Some("poly-sinc-long-ip") => (Self::LongLp, true),
-            Some(_) => (Self::Mp, false),
-            None => (Self::Mp, true),
-        }
-    }
-
-    fn as_label(self) -> &'static str {
-        match self {
-            Self::ShortMp => "poly-sinc-short-mp",
-            Self::Mp => "poly-sinc-mp",
-            Self::Lp => "poly-sinc-lp",
-            Self::LongLp => "poly-sinc-long-lp",
-        }
-    }
-}
-
-fn build_hq_resampler_params(
-    profile: HqResamplerProfile,
-    ratio: f64,
-) -> SincInterpolationParameters {
-    let (sinc_len, f_cutoff, oversampling_factor): (usize, f32, usize) = match profile {
-        HqResamplerProfile::ShortMp => {
-            if ratio >= 8.0 {
-                (18, 0.885, 4)
-            } else if ratio >= 4.0 {
-                (20, 0.890, 5)
-            } else {
-                (24, 0.900, 6)
-            }
-        }
-        HqResamplerProfile::Mp => {
-            if ratio >= 8.0 {
-                (32, 0.915, 6)
-            } else if ratio >= 4.0 {
-                (36, 0.925, 7)
-            } else {
-                (44, 0.935, 8)
-            }
-        }
-        HqResamplerProfile::Lp => {
-            if ratio >= 8.0 {
-                (56, 0.945, 8)
-            } else if ratio >= 4.0 {
-                (72, 0.952, 10)
-            } else {
-                (88, 0.958, 12)
-            }
-        }
-        HqResamplerProfile::LongLp => {
-            if ratio >= 8.0 {
-                (512, 0.968, 64)
-            } else if ratio >= 4.0 {
-                (256, 0.968, 32)
-            } else {
-                (192, 0.968, 20)
-            }
-        }
-    };
-
-    SincInterpolationParameters {
-        sinc_len,
-        f_cutoff: f_cutoff.clamp(0.82, 0.98),
-        interpolation: SincInterpolationType::Linear,
-        oversampling_factor: oversampling_factor.max(4),
-        window: WindowFunction::BlackmanHarris2,
-    }
 }
 
 fn classify_sample_rate_family(sample_rate: u32) -> Option<u32> {
@@ -272,136 +203,134 @@ fn normalize_target_sample_rate_for_source(source_sample_rate: u32, requested_ta
     }
 }
 
-fn deinterleave(interleaved: &[f32], channels: usize) -> Vec<Vec<f32>> {
-    let frames = if channels == 0 {
-        0
-    } else {
-        interleaved.len() / channels
-    };
-    let mut out = vec![Vec::<f32>::with_capacity(frames); channels];
-    for frame in interleaved.chunks_exact(channels) {
-        for (channel, sample) in frame.iter().enumerate() {
-            out[channel].push(*sample);
-        }
-    }
-    out
-}
-
-fn interleave(channels: &[Vec<f32>]) -> Vec<f32> {
-    if channels.is_empty() {
-        return Vec::new();
-    }
-    let frames = channels[0].len();
-    let channel_count = channels.len();
-    let mut out = Vec::<f32>::with_capacity(frames.saturating_mul(channel_count));
-    for frame_idx in 0..frames {
-        for channel in channels {
-            out.push(channel.get(frame_idx).copied().unwrap_or(0.0));
-        }
-    }
-    out
-}
-
-fn append_resampler_output(
-    output_by_channel: &mut [Vec<f32>],
-    processed: &[Vec<f32>],
-    expected_max_output_frames: usize,
-) -> Result<(), String> {
-    if processed.is_empty() || processed[0].is_empty() {
-        return Ok(());
-    }
-
-    let channels = output_by_channel.len();
-    if processed.len() != channels {
-        return Err(format!(
-            "HQ resampler returned unexpected channel count: expected {channels}, got {}",
-            processed.len()
-        ));
-    }
-
-    for channel in 0..channels {
-        output_by_channel[channel].extend_from_slice(&processed[channel]);
-        if output_by_channel[channel].len() > expected_max_output_frames {
-            return Err(format!(
-                "HQ resampler produced excessive output (>{expected_max_output_frames} frames per channel). Aborting to prevent memory runaway."
-            ));
-        }
-    }
-
-    Ok(())
-}
-
 fn resample_interleaved(
     input_samples: &[f32],
     channels: usize,
     input_sample_rate_hz: u32,
     output_sample_rate_hz: u32,
-    profile: HqResamplerProfile,
-) -> Result<Vec<f32>, String> {
+    filter_id: &str,
+    force_engine_override: OversamplingEngineOverride,
+) -> Result<(Vec<f32>, Option<RubatoFilterInfo>), String> {
     if channels == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     if input_sample_rate_hz == 0 || output_sample_rate_hz == 0 {
         return Err("Sample rate must be greater than zero.".to_string());
     }
     if input_sample_rate_hz == output_sample_rate_hz {
-        return Ok(input_samples.to_vec());
+        return Ok((input_samples.to_vec(), None));
+    }
+
+    if input_samples.len() % channels != 0 {
+        return Err(format!(
+            "Interleaved input size {} is not divisible by channel count {}.",
+            input_samples.len(),
+            channels
+        ));
     }
 
     let ratio = output_sample_rate_hz as f64 / input_sample_rate_hz as f64;
-    let params = build_hq_resampler_params(profile, ratio);
-    let mut resampler = SincFixedIn::<f32>::new(
-        ratio,
-        2.0,
-        params,
-        HQ_RESAMPLER_CHUNK_FRAMES,
+    let (mut filter, filter_info) = create_filter_with_engine_override(
+        Some(filter_id),
+        input_sample_rate_hz,
+        output_sample_rate_hz,
         channels,
+        force_engine_override,
     )
-    .map_err(|error| format!("Failed to initialize HQ resampler: {error}"))?;
+    .map_err(|error| format!("Failed to initialize oversampling filter: {error}"))?;
+    let engine_label = filter_info.as_ref().map(|info| info.engine);
 
-    let input_by_channel = deinterleave(input_samples, channels);
-    let total_input_frames = input_by_channel[0].len();
+    let total_input_frames = input_samples.len() / channels;
     let expected_frames = (total_input_frames as f64 * ratio).ceil() as usize;
-    // Allow generous headroom for ratio drift and filter tail while still
-    // catching runaway growth.
-    let extra_guard_frames = (HQ_RESAMPLER_CHUNK_FRAMES * 256)
+    // Allow generous headroom for filter tail while still catching runaway growth.
+    let chunk_frames = filter_info
+        .map(|info| info.input_chunk_frames.max(1))
+        .unwrap_or(HQ_RESAMPLER_CHUNK_FRAMES);
+    let extra_guard_frames = chunk_frames
+        .saturating_mul(256)
         .max(output_sample_rate_hz as usize * 4);
     let expected_max_output_frames = expected_frames.saturating_add(extra_guard_frames);
-    let mut cursor = 0usize;
-    let mut output_by_channel = vec![Vec::<f32>::new(); channels];
-    let mut chunk = vec![Vec::<f32>::with_capacity(HQ_RESAMPLER_CHUNK_FRAMES); channels];
+    let mut output = Vec::<f32>::with_capacity(expected_frames.saturating_mul(channels));
+    let mut cursor_frames = 0usize;
+    let mut scratch = Vec::<f32>::new();
+    let filter_ratio = filter.ratio().max(1.0);
 
-    while cursor + HQ_RESAMPLER_CHUNK_FRAMES <= total_input_frames {
-        for channel in 0..channels {
-            chunk[channel].clear();
-            chunk[channel].extend_from_slice(
-                &input_by_channel[channel][cursor..cursor + HQ_RESAMPLER_CHUNK_FRAMES],
-            );
+    while cursor_frames < total_input_frames {
+        let frames = (total_input_frames - cursor_frames).min(chunk_frames);
+        let start = cursor_frames.saturating_mul(channels);
+        let end = start.saturating_add(frames.saturating_mul(channels));
+        let required_capacity = ((frames as f64 * filter_ratio).ceil() as usize)
+            .saturating_mul(channels)
+            .saturating_add(channels.saturating_mul(64));
+        if scratch.capacity() < required_capacity {
+            scratch.reserve(required_capacity - scratch.capacity());
         }
-        let processed = resampler
-            .process(&chunk, None)
-            .map_err(|error| format!("Failed to process HQ resampler chunk: {error}"))?;
-        append_resampler_output(&mut output_by_channel, &processed, expected_max_output_frames)?;
-        cursor += HQ_RESAMPLER_CHUNK_FRAMES;
+
+        let produced = filter
+            .process_chunk(&input_samples[start..end], &mut scratch)
+            .map_err(|error| format!("Failed to process oversampling chunk: {error}"))?;
+        if produced > 0 {
+            if produced % channels != 0 {
+                return Err(format!(
+                    "Oversampling chunk produced {} samples, not divisible by channel count {}.",
+                    produced, channels
+                ));
+            }
+            output.extend_from_slice(&scratch[..produced]);
+            let output_frames = output.len() / channels;
+            if output_frames > expected_max_output_frames {
+                return Err(format!(
+                    "Oversampling produced excessive output (>{expected_max_output_frames} frames per channel). Aborting to prevent memory runaway."
+                ));
+            }
+        }
+        cursor_frames += frames;
     }
 
-    if cursor < total_input_frames {
-        for channel in 0..channels {
-            chunk[channel].clear();
-            chunk[channel].extend_from_slice(&input_by_channel[channel][cursor..]);
-        }
-        let processed = resampler
-            .process_partial(Some(&chunk), None)
-            .map_err(|error| format!("Failed to process final HQ resampler chunk: {error}"))?;
-        append_resampler_output(&mut output_by_channel, &processed, expected_max_output_frames)?;
+    let flush_frames = filter
+        .latency_frames()
+        .saturating_mul(4)
+        .max(chunk_frames.saturating_mul(4));
+    let flush_capacity = ((flush_frames as f64 * filter_ratio).ceil() as usize)
+        .saturating_mul(channels)
+        .saturating_add(channels.saturating_mul(64));
+    if scratch.capacity() < flush_capacity {
+        scratch.reserve(flush_capacity - scratch.capacity());
     }
 
-    let tail = resampler
-        .process_partial(None::<&[Vec<f32>]>, None)
-        .map_err(|error| format!("Failed to flush HQ resampler tail: {error}"))?;
-    append_resampler_output(&mut output_by_channel, &tail, expected_max_output_frames)?;
+    let single_shot_flush = matches!(engine_label, Some("rubato-sinc"));
+    let mut drained = false;
+    let flush_iterations = if single_shot_flush { 1 } else { 64 };
+    for _ in 0..flush_iterations {
+        let produced = filter
+            .process_chunk(&[], &mut scratch)
+            .map_err(|error| format!("Failed to flush oversampling tail: {error}"))?;
+        if produced == 0 {
+            drained = true;
+            break;
+        }
+        if produced % channels != 0 {
+            return Err(format!(
+                "Oversampling tail produced {} samples, not divisible by channel count {}.",
+                produced, channels
+            ));
+        }
+        output.extend_from_slice(&scratch[..produced]);
+        let output_frames = output.len() / channels;
+        if output_frames > expected_max_output_frames {
+            return Err(format!(
+                "Oversampling produced excessive output (>{expected_max_output_frames} frames per channel). Aborting to prevent memory runaway."
+            ));
+        }
+    }
 
-    Ok(interleave(&output_by_channel))
+    if !drained && !single_shot_flush {
+        return Err(
+            "Oversampling tail flush exceeded iteration guard (64).".to_string(),
+        );
+    }
+
+    Ok((output, filter_info))
 }
 
 fn dbfs_from_amplitude(value: f64) -> f64 {
@@ -502,8 +431,31 @@ struct ImpulseSpectrumStats {
     passband_peak_db: f64,
     stopband_start_hz: Option<f64>,
     stopband_end_hz: Option<f64>,
+    stopband_peak_hz: Option<f64>,
     stopband_peak_db: Option<f64>,
     stopband_attenuation_db: Option<f64>,
+    stopband_median_db: Option<f64>,
+    stopband_p95_db: Option<f64>,
+    stopband_median_attenuation_db: Option<f64>,
+    stopband_p95_attenuation_db: Option<f64>,
+}
+
+fn percentile_from_sorted(values: &[f64], percentile: f64) -> Option<f64> {
+    if values.is_empty() || !percentile.is_finite() {
+        return None;
+    }
+    let clamped = percentile.clamp(0.0, 100.0);
+    if values.len() == 1 {
+        return Some(values[0]);
+    }
+    let position = (clamped / 100.0) * (values.len() - 1) as f64;
+    let lower = position.floor() as usize;
+    let upper = position.ceil() as usize;
+    if lower == upper {
+        return Some(values[lower]);
+    }
+    let blend = position - lower as f64;
+    Some(values[lower] + (values[upper] - values[lower]) * blend)
 }
 
 fn fft_in_place(buffer: &mut [ComplexF64]) -> Result<(), String> {
@@ -607,10 +559,10 @@ fn analyze_impulse_spectrum(
     }
 
     let fft_size = frames.next_power_of_two().max(2048);
-    if fft_size > (1 << 20) {
+    if fft_size > MAX_IMPULSE_FFT_SIZE {
         return Err(format!(
-            "Impulse response is too long for FFT analysis ({} frames > supported limit).",
-            frames
+            "Impulse response is too long for FFT analysis ({} frames > supported limit {}).",
+            frames, MAX_IMPULSE_FFT_SIZE
         ));
     }
 
@@ -641,23 +593,48 @@ fn analyze_impulse_spectrum(
     let min_stopband_start_hz = (passband_end_hz + bin_hz).min(output_nyquist_hz);
     let stopband_start_hz = raw_stopband_start_hz.max(min_stopband_start_hz);
 
-    let (resolved_stopband_start_hz, stopband_peak_db, stopband_attenuation_db) =
+    let (
+        resolved_stopband_start_hz,
+        stopband_peak_hz,
+        stopband_peak_db,
+        stopband_attenuation_db,
+        stopband_median_db,
+        stopband_p95_db,
+        stopband_median_attenuation_db,
+        stopband_p95_attenuation_db,
+    ) =
         if stopband_start_hz >= output_nyquist_hz {
-            (None, None, None)
+            (None, None, None, None, None, None, None, None)
         } else {
             let start_bin = ((stopband_start_hz / bin_hz).ceil() as usize).min(half_bins);
             if start_bin >= half_bins {
-                (None, None, None)
+                (None, None, None, None, None, None, None, None)
             } else {
                 let mut stopband_peak = 0.0_f64;
+                let mut stopband_peak_bin = start_bin;
+                let mut stopband_magnitudes = Vec::<f64>::with_capacity(half_bins - start_bin + 1);
                 for bin in start_bin..=half_bins {
                     let magnitude = fft_input[bin].magnitude();
-                    stopband_peak = stopband_peak.max(magnitude);
+                    stopband_magnitudes.push(magnitude);
+                    if magnitude > stopband_peak {
+                        stopband_peak = magnitude;
+                        stopband_peak_bin = bin;
+                    }
                 }
+                stopband_magnitudes.sort_by(f64::total_cmp);
+                let stopband_median_amp = percentile_from_sorted(&stopband_magnitudes, 50.0);
+                let stopband_p95_amp = percentile_from_sorted(&stopband_magnitudes, 95.0);
                 (
                     Some(start_bin as f64 * bin_hz),
+                    Some(stopband_peak_bin as f64 * bin_hz),
                     Some(dbfs_from_amplitude(stopband_peak)),
                     Some(dbfs_from_amplitude(stopband_peak / passband_peak)),
+                    stopband_median_amp.map(dbfs_from_amplitude),
+                    stopband_p95_amp.map(dbfs_from_amplitude),
+                    stopband_median_amp
+                        .map(|amplitude| dbfs_from_amplitude(amplitude / passband_peak)),
+                    stopband_p95_amp
+                        .map(|amplitude| dbfs_from_amplitude(amplitude / passband_peak)),
                 )
             }
         };
@@ -669,8 +646,13 @@ fn analyze_impulse_spectrum(
         passband_peak_db: dbfs_from_amplitude(passband_peak),
         stopband_start_hz: resolved_stopband_start_hz,
         stopband_end_hz: resolved_stopband_start_hz.map(|_| output_nyquist_hz),
+        stopband_peak_hz,
         stopband_peak_db,
         stopband_attenuation_db,
+        stopband_median_db,
+        stopband_p95_db,
+        stopband_median_attenuation_db,
+        stopband_p95_attenuation_db,
     })
 }
 
@@ -726,6 +708,7 @@ fn build_impulse_analysis_metrics(
         profile_label: case.profile_label.clone(),
         output_sample_rate_hz: case.output_sample_rate_hz,
         channels: case.channels,
+        oversampling_engine: case.oversampling_engine.clone(),
         impulse_input_frames,
         impulse_output_frames,
         fft_size: spectrum.fft_size,
@@ -734,8 +717,13 @@ fn build_impulse_analysis_metrics(
         passband_peak_db: spectrum.passband_peak_db,
         stopband_start_hz: spectrum.stopband_start_hz,
         stopband_end_hz: spectrum.stopband_end_hz,
+        stopband_peak_hz: spectrum.stopband_peak_hz,
         stopband_peak_db: spectrum.stopband_peak_db,
         stopband_attenuation_db: spectrum.stopband_attenuation_db,
+        stopband_median_db: spectrum.stopband_median_db,
+        stopband_p95_db: spectrum.stopband_p95_db,
+        stopband_median_attenuation_db: spectrum.stopband_median_attenuation_db,
+        stopband_p95_attenuation_db: spectrum.stopband_p95_attenuation_db,
         impulse_wav_path,
     })
 }
@@ -1107,6 +1095,7 @@ fn run_case(
     decoded: &DecodedPcmData,
     filter_token: &str,
     target_sample_rate_hz: u32,
+    force_engine_override: OversamplingEngineOverride,
     output_dir: Option<&Path>,
     write_wav: bool,
     volume: f32,
@@ -1131,22 +1120,50 @@ fn run_case(
         source_sample_rate_hz
     };
 
+    let mut oversampling_engine: Option<String> = None;
     let mut processed_samples = if needs_resampling {
-        let (profile, matched) = HqResamplerProfile::from_filter_id(filter_id.as_deref());
+        let canonical_filter_id = canonical_engine_filter_id(filter_id.as_deref());
+        let normalized = filter_id
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let matched = normalized.is_empty()
+            || canonical_filter_id != "sinc-m-mp"
+            || normalized == "sinc-m-mp"
+            || normalized == "poly-sinc-mp";
         if !matched {
             notes.push(format!(
-                "Filter '{}' is not mapped yet in native HQ profile table; fallback profile '{}' is used.",
+                "Filter '{}' is not mapped in native oversampling table; fallback filter '{}' is used.",
                 filter_id.as_deref().unwrap_or("none"),
-                profile.as_label()
+                canonical_filter_id
             ));
         }
-        resample_interleaved(
+        let (samples, filter_info) = resample_interleaved(
             &decoded.samples,
             channels,
             source_sample_rate_hz,
             resolved_target_sample_rate_hz,
-            profile,
-        )?
+            canonical_filter_id,
+            force_engine_override,
+        )?;
+        if let Some(info) = filter_info {
+            notes.push(format!(
+                "Oversampling engine for '{}': {}",
+                filter_token, info.engine
+            ));
+            notes.push(format!(
+                "Oversampling params for '{}': engine={} sincLen={} cutoff={:.6} osf={} chunkFrames={}",
+                filter_token,
+                info.engine,
+                info.sinc_len,
+                info.f_cutoff,
+                info.oversampling_factor,
+                info.input_chunk_frames
+            ));
+            oversampling_engine = Some(info.engine.to_string());
+        }
+        samples
     } else {
         decoded.samples.to_vec()
     };
@@ -1168,10 +1185,9 @@ fn run_case(
     }
 
     let processing_time_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-    let profile_label = filter_id.as_deref().map(|filter_id| {
-        let (profile, _) = HqResamplerProfile::from_filter_id(Some(filter_id));
-        profile.as_label().to_string()
-    });
+    let profile_label = filter_id
+        .as_deref()
+        .map(|filter_id| canonical_engine_filter_id(Some(filter_id)).to_string());
 
     let mut wav_path = None;
     if write_wav {
@@ -1195,6 +1211,7 @@ fn run_case(
         profile_label,
         output_sample_rate_hz: case_sample_rate_hz,
         channels: decoded.source_info.channels,
+        oversampling_engine,
         samples: processed_samples,
         processing_time_ms,
         wav_path,
@@ -1232,6 +1249,7 @@ fn build_case_metrics(case: &RenderedCase) -> CaseMetrics {
         profile_label: case.profile_label.clone(),
         output_sample_rate_hz: case.output_sample_rate_hz,
         channels: case.channels,
+        oversampling_engine: case.oversampling_engine.clone(),
         frames,
         duration_seconds,
         processing_time_ms: case.processing_time_ms,
@@ -1266,7 +1284,8 @@ Usage:
     [--analyze-impulse] \\
     [--impulse-frames <n>] \\
     [--write-impulse-wav] \\
-    [--stopband-start-hz <hz>]
+    [--stopband-start-hz <hz>] \\
+    [--force-engine <auto|fft-ola|short-fir-direct|rubato-sinc>]
 
 Examples:
   cargo run --release --bin offline-oversampling-lab -- \\
@@ -1287,6 +1306,18 @@ fn parse_next_value(args: &[String], index: &mut usize, flag: &str) -> Result<St
     args.get(*index)
         .cloned()
         .ok_or_else(|| format!("Missing value for {flag}"))
+}
+
+fn parse_force_engine_override(raw: &str) -> Result<OversamplingEngineOverride, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(OversamplingEngineOverride::Auto),
+        "fft-ola" => Ok(OversamplingEngineOverride::FftOla),
+        "short-fir-direct" => Ok(OversamplingEngineOverride::ShortFirDirect),
+        "rubato-sinc" | "rubato" => Ok(OversamplingEngineOverride::RubatoSinc),
+        other => Err(format!(
+            "Invalid --force-engine value '{other}'. Expected one of: auto, fft-ola, short-fir-direct, rubato-sinc."
+        )),
+    }
 }
 
 fn parse_args() -> Result<CliArgs, String> {
@@ -1311,6 +1342,7 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut impulse_frames = DEFAULT_IMPULSE_FRAMES;
     let mut write_impulse_wav = false;
     let mut stopband_start_hz: Option<f64> = None;
+    let mut force_engine_override = OversamplingEngineOverride::Auto;
 
     let mut index = 0usize;
     while index < args.len() {
@@ -1404,6 +1436,10 @@ fn parse_args() -> Result<CliArgs, String> {
                 }
                 stopband_start_hz = Some(parsed);
             }
+            "--force-engine" => {
+                let raw = parse_next_value(&args, &mut index, "--force-engine")?;
+                force_engine_override = parse_force_engine_override(&raw)?;
+            }
             unknown => {
                 return Err(format!("Unknown argument: {unknown}. Use --help to see usage."));
             }
@@ -1415,13 +1451,13 @@ fn parse_args() -> Result<CliArgs, String> {
     let filters = filters.unwrap_or_else(|| {
         vec![
             "none".to_string(),
-            "poly-sinc-short-mp".to_string(),
-            "poly-sinc-mp".to_string(),
-            "poly-sinc-lp".to_string(),
-            "poly-sinc-long-lp".to_string(),
-            "poly-sinc-long-ip".to_string(),
-            "poly-sinc-gauss".to_string(),
-            "poly-sinc-ext2".to_string(),
+            "sinc-s-mp".to_string(),
+            "sinc-m-mp".to_string(),
+            "sinc-m-lp".to_string(),
+            "sinc-l-lp".to_string(),
+            "sinc-l-ip".to_string(),
+            "sinc-m-gauss".to_string(),
+            "sinc-m-lp-ext2".to_string(),
         ]
     });
     if filters.is_empty() {
@@ -1454,6 +1490,7 @@ fn parse_args() -> Result<CliArgs, String> {
         impulse_frames,
         write_impulse_wav,
         stopband_start_hz,
+        force_engine_override,
     })
 }
 
@@ -1508,6 +1545,12 @@ fn run() -> Result<(), String> {
         "Decoder backend: {}",
         decoder_backend.name()
     ));
+    if args.force_engine_override != OversamplingEngineOverride::Auto {
+        notes.push(format!(
+            "Forced oversampling engine: {}",
+            args.force_engine_override.as_str()
+        ));
+    }
 
     let requested_reference_filter = args
         .reference_filter
@@ -1532,6 +1575,7 @@ fn run() -> Result<(), String> {
         &decoded,
         &resolved_reference_filter,
         target_sample_rate_hz,
+        args.force_engine_override,
         args.output_dir.as_deref(),
         args.write_wav,
         args.volume,
@@ -1550,6 +1594,7 @@ fn run() -> Result<(), String> {
             &decoded,
             &resolved_reference_filter,
             target_sample_rate_hz,
+            args.force_engine_override,
             None,
             false,
             args.volume,
@@ -1581,6 +1626,7 @@ fn run() -> Result<(), String> {
             &decoded,
             filter,
             target_sample_rate_hz,
+            args.force_engine_override,
             args.output_dir.as_deref(),
             args.write_wav,
             args.volume,
@@ -1610,6 +1656,7 @@ fn run() -> Result<(), String> {
                 &decoded,
                 filter,
                 target_sample_rate_hz,
+                args.force_engine_override,
                 None,
                 false,
                 args.volume,
@@ -1661,6 +1708,7 @@ fn run() -> Result<(), String> {
                 &impulse_source,
                 filter,
                 target_sample_rate_hz,
+                args.force_engine_override,
                 None,
                 false,
                 1.0_f32,

@@ -244,7 +244,8 @@ Phase 2完了後、既存の `offline-oversampling-lab` を使って以下を確
 
 排他再生（WASAPI exclusive）での実時間性は以下を最低基準とする。
 
-- `exclusive producer perf` の `realtimeFactor >= 1.0` を連続維持すること（推奨: `>= 1.1`）
+- `exclusive producer perf` の `computeFactor >= 1.0` を連続維持すること（推奨: `>= 1.1`）
+- `exclusive producer perf` の `queueWait` が高い場合（目安: 20%以上）は、`realtimeFactor` はキュー背圧込みの見かけ値として扱い、ボトルネック判定は `computeFactor` を優先する
 - `exclusive perf` の `pendingSec(current)` が継続的に 0 近傍へ張り付かないこと
 - 5分連続再生で `underrunCount` が実用上問題ない水準であること（目安: 0〜ごく少数）
 

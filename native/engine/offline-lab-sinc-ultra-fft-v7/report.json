@@ -1,0 +1,65 @@
+{
+  "source": "C:\\aonsoku\\cypress\\fixtures\\song.mp3",
+  "sourceSampleRateHz": 44100,
+  "sourceChannels": 2,
+  "sourceDurationSeconds": 207.0987755102041,
+  "targetSampleRateHz": 352800,
+  "writeWav": false,
+  "outputDir": "C:\\aonsoku\\native\\engine\\offline-lab-sinc-ultra-fft-v7",
+  "notes": [
+    "Target sample rate was normalized from 384000 Hz to 352800 Hz to match source family (44100 Hz).",
+    "Decoder backend: symphonia",
+    "Forced oversampling engine: fft-ola",
+    "Oversampling engine for 'sinc-ultra': fft-ola",
+    "Oversampling params for 'sinc-ultra': engine=fft-ola sincLen=4096 cutoff=0.488000 osf=8 chunkFrames=4096",
+    "[impulse:sinc-ultra] Oversampling engine for 'sinc-ultra': fft-ola",
+    "[impulse:sinc-ultra] Oversampling params for 'sinc-ultra': engine=fft-ola sincLen=4096 cutoff=0.488000 osf=8 chunkFrames=4096"
+  ],
+  "cases": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "fft-ola",
+      "frames": 73097208,
+      "durationSeconds": 207.19163265306122,
+      "processingTimeMs": 1152.7776999999999,
+      "peakDbfs": 0.8263966245291897,
+      "truePeakDbfs": 0.8263966245291897,
+      "rmsDbfs": -10.850153623432469,
+      "crestFactorDb": 11.676550247961659,
+      "clipSamples": 113,
+      "clipRatio": 7.729433386840165e-7,
+      "wavPath": null
+    }
+  ],
+  "comparisons": [],
+  "impulseAnalyses": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "fft-ola",
+      "impulseInputFrames": 131072,
+      "impulseOutputFrames": 1081336,
+      "fftSize": 2097152,
+      "effectiveNyquistHz": 22050.0,
+      "passbandEndHz": 20947.5,
+      "passbandPeakDb": 17.049599941605564,
+      "stopbandStartHz": 22050.0,
+      "stopbandEndHz": 176400.0,
+      "stopbandPeakHz": 65620.75424194336,
+      "stopbandPeakDb": -62.21760228357646,
+      "stopbandAttenuationDb": -79.26720222518202,
+      "stopbandMedianDb": -135.7167870484644,
+      "stopbandP95Db": -129.32230083964907,
+      "stopbandMedianAttenuationDb": -152.76638699006998,
+      "stopbandP95AttenuationDb": -146.37190078125462,
+      "impulseWavPath": null
+    }
+  ]
+}

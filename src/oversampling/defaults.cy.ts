@@ -10,7 +10,7 @@ describe('Oversampling defaults (WP4 regression)', () => {
 
     expect(capability.supportedOutputApis).to.deep.equal(['wasapi-exclusive'])
     expect(capability.availableEngines).to.deep.equal(['cpu'])
-    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 65536 })
+    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 2_097_152 })
   })
 
   it('resolves default settings with exclusive/cpu capability', () => {
@@ -27,7 +27,7 @@ describe('Oversampling defaults (WP4 regression)', () => {
     expect(result.value.outputApi).to.equal('wasapi-exclusive')
     expect(result.value.selectedEngine).to.equal('cpu')
     expect(result.value.targetRatePolicy).to.equal('integer-family-max')
-    expect(result.value.preset.id).to.equal('poly-sinc-mp')
+    expect(result.value.preset.id).to.equal('sinc-m-mp')
   })
 
   it('rejects shared mode at resolver level for default capability', () => {

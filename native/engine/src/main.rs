@@ -8,6 +8,7 @@ mod commands;
 mod decoder;
 mod engine;
 mod error;
+mod oversampling;
 mod protocol;
 mod runtime;
 

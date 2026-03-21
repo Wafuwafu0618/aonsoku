@@ -2,10 +2,7 @@
 mod wasapi_probe {
     use crate::audio::{ParametricEqConfig, ParametricEqProcessor};
     use crate::error::ExclusiveProbeError;
-    use rubato::{
-        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
-    };
+    use crate::oversampling::{self, HqResamplerProfile, OversamplingFilter};
     use std::ffi::c_void;
     use std::io::{Cursor, ErrorKind};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +37,6 @@ mod wasapi_probe {
         I16,
     }
 
-    const HQ_RESAMPLER_CHUNK_FRAMES: usize = 512;
     const HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN: f32 = 0.89;
     const EXCLUSIVE_PENDING_MULTIPLIER_PASSTHROUGH: usize = 3;
     const EXCLUSIVE_MAX_PENDING_MULTIPLIER: usize = 8;
@@ -54,90 +50,11 @@ mod wasapi_probe {
     const HEAVY_LONG_LP_REFILL_BUDGET_SECONDS: f64 = 0.08;
     const HEAVY_LONG_LP_PRODUCER_CHUNK_SECONDS: f64 = 0.25;
     const HEAVY_LONG_LP_MAX_FILL_CALL_SECONDS: f64 = 0.02;
+    const EXCLUSIVE_STARTUP_FADE_IN_SECONDS: f64 = 0.010;
+    const EXCLUSIVE_STOP_FADE_OUT_SECONDS: f64 = 0.010;
+    const EXCLUSIVE_STOP_FADE_OUT_TIMEOUT_SECONDS: f64 = 0.25;
     const EXCLUSIVE_PERF_LOG_INTERVAL: Duration = Duration::from_secs(1);
     const EXCLUSIVE_PERF_MAX_SAMPLES_PER_INTERVAL: usize = 32_768;
-
-    #[derive(Clone, Copy, Debug)]
-    enum HqResamplerProfile {
-        ShortMp,
-        Mp,
-        Lp,
-        LongLp,
-    }
-
-    impl HqResamplerProfile {
-        fn from_filter_id(filter_id: Option<&str>) -> Self {
-            match filter_id {
-                Some("poly-sinc-short-mp") => Self::ShortMp,
-                Some("poly-sinc-mp") => Self::Mp,
-                Some("poly-sinc-lp") => Self::Lp,
-                Some("poly-sinc-long-lp") | Some("poly-sinc-long-ip") => Self::LongLp,
-                _ => Self::Mp,
-            }
-        }
-
-        fn as_label(self) -> &'static str {
-            match self {
-                Self::ShortMp => "poly-sinc-short-mp",
-                Self::Mp => "poly-sinc-mp",
-                Self::Lp => "poly-sinc-lp",
-                Self::LongLp => "poly-sinc-long-lp",
-            }
-        }
-    }
-
-    fn build_hq_resampler_params(
-        profile: HqResamplerProfile,
-        ratio: f64,
-    ) -> SincInterpolationParameters {
-        // Explicit per-profile/per-ratio tiers so presets are audibly more distinct.
-        let (sinc_len, f_cutoff, oversampling_factor): (usize, f32, usize) = match profile {
-            HqResamplerProfile::ShortMp => {
-                if ratio >= 8.0 {
-                    (18, 0.885, 4)
-                } else if ratio >= 4.0 {
-                    (20, 0.890, 5)
-                } else {
-                    (24, 0.900, 6)
-                }
-            }
-            HqResamplerProfile::Mp => {
-                if ratio >= 8.0 {
-                    (32, 0.915, 6)
-                } else if ratio >= 4.0 {
-                    (36, 0.925, 7)
-                } else {
-                    (44, 0.935, 8)
-                }
-            }
-            HqResamplerProfile::Lp => {
-                if ratio >= 8.0 {
-                    (56, 0.945, 8)
-                } else if ratio >= 4.0 {
-                    (72, 0.952, 10)
-                } else {
-                    (88, 0.958, 12)
-                }
-            }
-            HqResamplerProfile::LongLp => {
-                if ratio >= 8.0 {
-                    (512, 0.968, 64)
-                } else if ratio >= 4.0 {
-                    (256, 0.968, 32)
-                } else {
-                    (192, 0.968, 20)
-                }
-            }
-        };
-
-        SincInterpolationParameters {
-            sinc_len,
-            f_cutoff: f_cutoff.clamp(0.82, 0.98),
-            interpolation: SincInterpolationType::Linear,
-            oversampling_factor: oversampling_factor.max(4),
-            window: WindowFunction::BlackmanHarris2,
-        }
-    }
 
     fn hq_pending_multiplier(profile: HqResamplerProfile, ratio: f64) -> usize {
         match profile {
@@ -387,28 +304,6 @@ mod wasapi_probe {
             self.pending_min_samples = self.pending_last_samples;
             self.pending_max_samples = self.pending_last_samples;
             self.underrun_last_total = underrun_total;
-        }
-    }
-
-    fn hq_resampler_chunk_frames(profile: HqResamplerProfile, ratio: f64) -> usize {
-        match profile {
-            HqResamplerProfile::LongLp => {
-                if ratio >= 8.0 {
-                    4096
-                } else if ratio >= 4.0 {
-                    2048
-                } else {
-                    1024
-                }
-            }
-            HqResamplerProfile::Lp => {
-                if ratio >= 8.0 {
-                    2048
-                } else {
-                    1024
-                }
-            }
-            HqResamplerProfile::Mp | HqResamplerProfile::ShortMp => HQ_RESAMPLER_CHUNK_FRAMES,
         }
     }
 
@@ -786,15 +681,14 @@ mod wasapi_probe {
         source: S,
         input_channels: usize,
         output_channels: usize,
-        resampler: SincFixedIn<f32>,
+        filter: Box<dyn OversamplingFilter>,
         input_chunk_frames: usize,
-        input_buffer: Vec<Vec<f32>>,
+        input_chunk: Vec<f32>,
         frame_buffer: Vec<f32>,
         output_buffer: Vec<f32>,
         output_index: usize,
         source_exhausted: bool,
         tail_flushed: bool,
-        failed: bool,
     }
 
     trait ExclusiveSampleProducer {
@@ -867,7 +761,7 @@ mod wasapi_probe {
             source: S,
             output_channels: usize,
             output_sample_rate: u32,
-            profile: HqResamplerProfile,
+            filter_id: Option<&str>,
         ) -> Result<Self, ExclusiveProbeError> {
             let input_channels = source.channels() as usize;
             let input_sample_rate = source.sample_rate();
@@ -880,72 +774,72 @@ mod wasapi_probe {
                 });
             }
 
-            let ratio = output_sample_rate as f64 / input_sample_rate as f64;
-            let params = build_hq_resampler_params(profile, ratio);
-            let input_chunk_frames = hq_resampler_chunk_frames(profile, ratio);
-            eprintln!(
-                "[NativeAudioSidecar] hq-sinc params profile={} ratio={:.3} sinc_len={} cutoff={:.3} osf={} chunkFrames={}",
-                profile.as_label(),
-                ratio,
-                params.sinc_len,
-                params.f_cutoff,
-                params.oversampling_factor,
-                input_chunk_frames
-            );
-
-            let resampler = SincFixedIn::<f32>::new(
-                ratio,
-                2.0,
-                params,
-                input_chunk_frames,
+            let (filter, filter_info) = oversampling::create_filter(
+                filter_id,
+                input_sample_rate,
+                output_sample_rate,
                 output_channels.max(1),
             )
-            .map_err(|error| ExclusiveProbeError {
+            .map_err(|message| ExclusiveProbeError {
                 code: "exclusive-resampler-init-failed",
-                message: format!("Failed to initialize HQ resampler: {error}"),
+                message,
             })?;
+            let input_chunk_frames = filter_info
+                .map(|info| {
+                    eprintln!(
+                        "[NativeAudioSidecar] hq-sinc params engine={} profile={} ratio={:.3} sinc_len={} cutoff={:.3} osf={} chunkFrames={}",
+                        info.engine,
+                        info.filter_id,
+                        info.ratio,
+                        info.sinc_len,
+                        info.f_cutoff,
+                        info.oversampling_factor,
+                        info.input_chunk_frames
+                    );
+                    info.input_chunk_frames
+                })
+                .unwrap_or(512);
+            let expected_output_frames = ((input_chunk_frames as f64 * filter.ratio())
+                .ceil()
+                .max(1.0)) as usize;
+            let output_buffer_capacity = expected_output_frames
+                .saturating_mul(output_channels.max(1))
+                .saturating_mul(2);
 
             Ok(Self {
                 source,
                 input_channels,
                 output_channels: output_channels.max(1),
-                resampler,
+                filter,
                 input_chunk_frames,
-                input_buffer: vec![
-                    Vec::with_capacity(input_chunk_frames);
-                    output_channels.max(1)
-                ],
+                input_chunk: Vec::with_capacity(
+                    input_chunk_frames.saturating_mul(output_channels.max(1)),
+                ),
                 frame_buffer: vec![0.0_f32; input_channels],
-                output_buffer: Vec::new(),
+                output_buffer: Vec::with_capacity(output_buffer_capacity),
                 output_index: 0,
                 source_exhausted: false,
                 tail_flushed: false,
-                failed: false,
             })
         }
 
-        fn interleave_output(&mut self, processed: &[Vec<f32>]) {
+        fn refill_from_filter(&mut self, input: &[f32], is_tail_flush: bool) -> Result<(), ExclusiveProbeError> {
             self.output_buffer.clear();
             self.output_index = 0;
-
-            if processed.is_empty() {
-                return;
+            let written = self
+                .filter
+                .process_chunk(input, &mut self.output_buffer)
+                .map_err(|message| ExclusiveProbeError {
+                    code: "exclusive-resampler-process-failed",
+                    message,
+                })?;
+            if written < self.output_buffer.len() {
+                self.output_buffer.truncate(written);
             }
-
-            let output_frames = processed[0].len();
-            self.output_buffer
-                .reserve(output_frames.saturating_mul(self.output_channels));
-
-            for frame_index in 0..output_frames {
-                for channel in 0..self.output_channels {
-                    let sample = processed
-                        .get(channel)
-                        .and_then(|ch| ch.get(frame_index))
-                        .copied()
-                        .unwrap_or(0.0);
-                    self.output_buffer.push(sample);
-                }
+            if is_tail_flush && written == 0 {
+                self.tail_flushed = true;
             }
+            Ok(())
         }
 
         fn refill(&mut self) -> Result<(), ExclusiveProbeError> {
@@ -955,22 +849,10 @@ mod wasapi_probe {
                     self.output_index = 0;
                     return Ok(());
                 }
-
-                let processed = self
-                    .resampler
-                    .process_partial(None::<&[Vec<f32>]>, None)
-                    .map_err(|error| ExclusiveProbeError {
-                        code: "exclusive-resampler-process-failed",
-                        message: format!("Failed to flush HQ resampler tail: {error}"),
-                    })?;
-                self.tail_flushed = true;
-                self.interleave_output(&processed);
-                return Ok(());
+                return self.refill_from_filter(&[], true);
             }
 
-            for channel in 0..self.output_channels {
-                self.input_buffer[channel].clear();
-            }
+            self.input_chunk.clear();
             let mut frames_read = 0usize;
 
             'read_frames: while frames_read < self.input_chunk_frames {
@@ -983,7 +865,7 @@ mod wasapi_probe {
                 }
 
                 for output_channel in 0..self.output_channels {
-                    self.input_buffer[output_channel].push(map_channel_sample(
+                    self.input_chunk.push(map_channel_sample(
                         &self.frame_buffer,
                         self.input_channels,
                         output_channel,
@@ -993,39 +875,14 @@ mod wasapi_probe {
             }
 
             if frames_read == 0 {
-                let processed = self
-                    .resampler
-                    .process_partial(None::<&[Vec<f32>]>, None)
-                    .map_err(|error| ExclusiveProbeError {
-                        code: "exclusive-resampler-process-failed",
-                        message: format!("Failed to flush HQ resampler tail: {error}"),
-                    })?;
-                self.tail_flushed = true;
-                self.interleave_output(&processed);
-                return Ok(());
+                self.source_exhausted = true;
+                return self.refill();
             }
 
-            if self.source_exhausted {
-                let processed = self
-                    .resampler
-                    .process_partial(Some(&self.input_buffer), None)
-                    .map_err(|error| ExclusiveProbeError {
-                        code: "exclusive-resampler-process-failed",
-                        message: format!("Failed to process final HQ resampler chunk: {error}"),
-                    })?;
-                self.interleave_output(&processed);
-                return Ok(());
-            }
-
-            let processed = self
-                .resampler
-                .process(&self.input_buffer, None)
-                .map_err(|error| ExclusiveProbeError {
-                    code: "exclusive-resampler-process-failed",
-                    message: format!("Failed to process HQ resampler chunk: {error}"),
-                })?;
-            self.interleave_output(&processed);
-            Ok(())
+            let input_chunk = std::mem::take(&mut self.input_chunk);
+            let refill_result = self.refill_from_filter(&input_chunk, false);
+            self.input_chunk = input_chunk;
+            refill_result
         }
 
         fn fill_samples(
@@ -1033,7 +890,7 @@ mod wasapi_probe {
             output: &mut Vec<f32>,
             max_samples: usize,
         ) -> Result<usize, ExclusiveProbeError> {
-            if self.failed || max_samples == 0 {
+            if max_samples == 0 {
                 return Ok(0);
             }
 
@@ -1081,38 +938,6 @@ mod wasapi_probe {
             }
 
             Ok(output.len().saturating_sub(initial_len))
-        }
-    }
-
-    impl<S> Iterator for HqResampledIterator<S>
-    where
-        S: PlaybackSource,
-    {
-        type Item = f32;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.failed {
-                return None;
-            }
-
-            while self.output_index >= self.output_buffer.len() {
-                if let Err(error) = self.refill() {
-                    self.failed = true;
-                    eprintln!(
-                        "[NativeAudioSidecar] HQ resampler failed: {} ({})",
-                        error.message, error.code
-                    );
-                    return None;
-                }
-
-                if self.output_buffer.is_empty() && self.source_exhausted && self.tail_flushed {
-                    return None;
-                }
-            }
-
-            let sample = self.output_buffer[self.output_index];
-            self.output_index += 1;
-            Some(sample)
         }
     }
 
@@ -1546,6 +1371,71 @@ mod wasapi_probe {
         }
     }
 
+    struct StartupFadeInState {
+        total_frames: usize,
+        remaining_frames: usize,
+    }
+
+    impl StartupFadeInState {
+        fn new(sample_rate_hz: u32) -> Self {
+            let total_frames = ((sample_rate_hz as f64 * EXCLUSIVE_STARTUP_FADE_IN_SECONDS).round()
+                as usize)
+                .max(1);
+            Self {
+                total_frames,
+                remaining_frames: total_frames,
+            }
+        }
+
+        fn remaining_frames(&self) -> usize {
+            self.remaining_frames
+        }
+
+        fn next_frame_gain(&mut self) -> f32 {
+            if self.remaining_frames == 0 {
+                return 1.0;
+            }
+
+            let progressed_frames = self
+                .total_frames
+                .saturating_sub(self.remaining_frames)
+                .saturating_add(1);
+            self.remaining_frames = self.remaining_frames.saturating_sub(1);
+            progressed_frames as f32 / self.total_frames as f32
+        }
+    }
+
+    struct StopFadeOutState {
+        total_frames: usize,
+        remaining_frames: usize,
+    }
+
+    impl StopFadeOutState {
+        fn new(sample_rate_hz: u32) -> Self {
+            let total_frames = ((sample_rate_hz as f64 * EXCLUSIVE_STOP_FADE_OUT_SECONDS).round()
+                as usize)
+                .max(1);
+            Self {
+                total_frames,
+                remaining_frames: total_frames,
+            }
+        }
+
+        fn remaining_frames(&self) -> usize {
+            self.remaining_frames
+        }
+
+        fn next_frame_gain(&mut self) -> f32 {
+            if self.remaining_frames == 0 {
+                return 0.0;
+            }
+
+            let gain = self.remaining_frames as f32 / self.total_frames as f32;
+            self.remaining_frames = self.remaining_frames.saturating_sub(1);
+            gain
+        }
+    }
+
     fn write_render_frames(
         buffer_ptr: *mut u8,
         frames_to_write: usize,
@@ -1554,28 +1444,154 @@ mod wasapi_probe {
         samples: &[f32],
         pre_gain: f32,
         volume: f32,
+        mut startup_fade_in: Option<&mut StartupFadeInState>,
+        mut stop_fade_out: Option<&mut StopFadeOutState>,
     ) {
         let sample_count = frames_to_write * channels;
 
         match sample_format {
             ExclusiveSampleFormat::F32 => unsafe {
                 let output = std::slice::from_raw_parts_mut(buffer_ptr as *mut f32, sample_count);
-                for (index, out_sample) in output.iter_mut().enumerate() {
-                    *out_sample = samples[index] * pre_gain * volume;
+                let mut sample_index = 0usize;
+                for _ in 0..frames_to_write {
+                    let mut envelope_gain = 1.0_f32;
+                    if let Some(state) = startup_fade_in.as_deref_mut() {
+                        envelope_gain *= state.next_frame_gain();
+                    }
+                    if let Some(state) = stop_fade_out.as_deref_mut() {
+                        envelope_gain *= state.next_frame_gain();
+                    }
+                    let gain = pre_gain * volume * envelope_gain;
+                    for _ in 0..channels {
+                        output[sample_index] = samples[sample_index] * gain;
+                        sample_index += 1;
+                    }
                 }
             },
             ExclusiveSampleFormat::I16 => unsafe {
                 let output = std::slice::from_raw_parts_mut(buffer_ptr as *mut i16, sample_count);
-                for (index, out_sample) in output.iter_mut().enumerate() {
-                    let value = (samples[index] * pre_gain * volume).clamp(-1.0, 1.0);
-                    *out_sample = (value * i16::MAX as f32) as i16;
+                let mut sample_index = 0usize;
+                for _ in 0..frames_to_write {
+                    let mut envelope_gain = 1.0_f32;
+                    if let Some(state) = startup_fade_in.as_deref_mut() {
+                        envelope_gain *= state.next_frame_gain();
+                    }
+                    if let Some(state) = stop_fade_out.as_deref_mut() {
+                        envelope_gain *= state.next_frame_gain();
+                    }
+                    let gain = pre_gain * volume * envelope_gain;
+                    for _ in 0..channels {
+                        let value = (samples[sample_index] * gain).clamp(-1.0, 1.0);
+                        output[sample_index] = (value * i16::MAX as f32) as i16;
+                        sample_index += 1;
+                    }
                 }
             },
         }
     }
 
+    fn write_stop_fade_out(
+        audio_client: &IAudioClient,
+        render_client: &IAudioRenderClient,
+        channels: usize,
+        sample_format: ExclusiveSampleFormat,
+        pre_gain: f32,
+        volume: f32,
+        sample_rate: u32,
+        buffer_frame_count: usize,
+        pending_samples: &mut Vec<f32>,
+        pending_start: &mut usize,
+    ) -> Result<usize, ExclusiveProbeError> {
+        let mut fade_out = StopFadeOutState::new(sample_rate);
+        if fade_out.remaining_frames() == 0 {
+            return Ok(0);
+        }
+
+        let mut written_total_frames = 0usize;
+        let mut scratch = Vec::<f32>::new();
+        let timeout = Duration::from_secs_f64(EXCLUSIVE_STOP_FADE_OUT_TIMEOUT_SECONDS);
+        let deadline = Instant::now() + timeout;
+
+        while fade_out.remaining_frames() > 0 {
+            if Instant::now() >= deadline {
+                eprintln!(
+                    "[NativeAudioSidecar] exclusive stop fade-out timeout after {:.3}s (written={} frames remaining={})",
+                    timeout.as_secs_f64(),
+                    written_total_frames,
+                    fade_out.remaining_frames()
+                );
+                break;
+            }
+            let padding = unsafe { audio_client.GetCurrentPadding() }.map_err(|error| {
+                classify_windows_error(
+                    "exclusive-padding-failed",
+                    "Failed to query exclusive padding during stop fade-out",
+                    error,
+                )
+            })?;
+            let writable_frames = buffer_frame_count.saturating_sub(padding as usize);
+            if writable_frames == 0 {
+                thread::yield_now();
+                continue;
+            }
+
+            let frames_to_write = writable_frames.min(fade_out.remaining_frames());
+            let samples_to_write = frames_to_write.saturating_mul(channels);
+            if scratch.len() < samples_to_write {
+                scratch.resize(samples_to_write, 0.0);
+            }
+            scratch[..samples_to_write].fill(0.0);
+
+            let available = pending_samples.len().saturating_sub(*pending_start);
+            let copy_len = available.min(samples_to_write);
+            if copy_len > 0 {
+                scratch[..copy_len].copy_from_slice(
+                    &pending_samples[*pending_start..*pending_start + copy_len],
+                );
+                *pending_start += copy_len;
+                if *pending_start >= pending_samples.len() {
+                    pending_samples.clear();
+                    *pending_start = 0;
+                }
+            }
+
+            let buffer_ptr =
+                unsafe { render_client.GetBuffer(frames_to_write as u32) }.map_err(|error| {
+                    classify_windows_error(
+                        "exclusive-buffer-get-failed",
+                        "Failed to acquire exclusive render buffer during stop fade-out",
+                        error,
+                    )
+                })?;
+
+            write_render_frames(
+                buffer_ptr,
+                frames_to_write,
+                channels,
+                sample_format,
+                &scratch[..samples_to_write],
+                pre_gain,
+                volume,
+                None,
+                Some(&mut fade_out),
+            );
+
+            unsafe { render_client.ReleaseBuffer(frames_to_write as u32, 0) }.map_err(|error| {
+                classify_windows_error(
+                    "exclusive-buffer-release-failed",
+                    "Failed to release exclusive render buffer during stop fade-out",
+                    error,
+                )
+            })?;
+            written_total_frames = written_total_frames.saturating_add(frames_to_write);
+        }
+
+        Ok(written_total_frames)
+    }
+
     pub(crate) fn run_default_exclusive_playback(
         audio_data: Arc<[u8]>,
+        started_flag: Arc<AtomicBool>,
         start_at_seconds: f64,
         playback_rate: f64,
         loop_enabled: bool,
@@ -1585,6 +1601,7 @@ mod wasapi_probe {
         parametric_eq: Option<ParametricEqConfig>,
         stop_receiver: Receiver<()>,
     ) -> Result<bool, ExclusiveProbeError> {
+        started_flag.store(false, Ordering::Relaxed);
         unsafe {
             let init_hr = CoInitializeEx(None, COINIT_MULTITHREADED);
             let should_uninitialize = if init_hr.is_ok() {
@@ -1723,8 +1740,11 @@ mod wasapi_probe {
                 }
                 let use_passthrough =
                     source_channels == channels_u16 && source_sample_rate == sample_rate;
-                let hq_profile =
-                    HqResamplerProfile::from_filter_id(oversampling_filter_id.as_deref());
+                let hq_filter_label = oversampling_filter_id
+                    .as_deref()
+                    .map(|id| oversampling::canonical_filter_id(Some(id)))
+                    .unwrap_or("sinc-m-mp");
+                let hq_profile = HqResamplerProfile::from_filter_id(Some(hq_filter_label));
                 let resample_ratio = if source_sample_rate == 0 {
                     1.0
                 } else {
@@ -1824,7 +1844,7 @@ mod wasapi_probe {
                     if use_passthrough {
                         String::new()
                     } else {
-                        format!(" ({})", hq_profile.as_label())
+                        format!(" ({})", hq_filter_label)
                     },
                 );
                 if heavy_long_lp_mode {
@@ -1884,7 +1904,7 @@ mod wasapi_probe {
                     )
                     .max(channels)
                 } else {
-                    usize::MAX
+                    refill_budget_per_cycle_samples.max(channels)
                 };
                 let refill_trigger_samples = if heavy_long_lp_mode {
                     let heavy_refill_trigger_samples = samples_for_duration(
@@ -1927,7 +1947,7 @@ mod wasapi_probe {
                 if !use_passthrough {
                     eprintln!(
                         "[NativeAudioSidecar] hq-sinc buffering profile={} ratio={:.3} pending_mul={} refill_mul={} targetPending={} (~{:.2}s, raw={}) refillBudget={} (~{:.3}s, raw={}) refillTrigger={} (~{:.2}s) maxFillPerCall={} (~{:.3}s)",
-                        hq_profile.as_label(),
+                        hq_filter_label,
                         resample_ratio,
                         pending_buffer_multiplier,
                         refill_budget_multiplier,
@@ -1971,7 +1991,8 @@ mod wasapi_probe {
                     producer_chunk_samples,
                     producer_channel_capacity,
                     if samples_per_second > 0.0 {
-                        (producer_chunk_samples * producer_channel_capacity) as f64
+                        producer_chunk_samples
+                            .saturating_mul(producer_channel_capacity) as f64
                             / samples_per_second
                     } else {
                         0.0
@@ -2009,9 +2030,7 @@ mod wasapi_probe {
                                         source,
                                         channels,
                                         sample_rate,
-                                        HqResamplerProfile::from_filter_id(
-                                            producer_filter_id.as_deref(),
-                                        ),
+                                        producer_filter_id.as_deref(),
                                     )?,
                                 }))
                             }
@@ -2034,7 +2053,12 @@ mod wasapi_probe {
                     let mut producer_perf_started = Instant::now();
                     let mut producer_fill_calls = 0u64;
                     let mut producer_fill_samples = 0u64;
+                    let mut producer_fill_compute_micros = 0u64;
                     let mut producer_fill_call_micros = Vec::<u64>::with_capacity(1024);
+                    let mut producer_send_wait_micros = 0u64;
+                    let mut producer_send_wait_call_micros = Vec::<u64>::with_capacity(1024);
+                    let mut producer_send_full_retries = 0u64;
+                    let mut producer_send_blocked_calls = 0u64;
                     let producer_samples_per_second = sample_rate as f64 * channels as f64;
 
                     loop {
@@ -2061,6 +2085,8 @@ mod wasapi_probe {
                         producer_fill_calls = producer_fill_calls.saturating_add(1);
                         producer_fill_samples =
                             producer_fill_samples.saturating_add(added_samples as u64);
+                        producer_fill_compute_micros =
+                            producer_fill_compute_micros.saturating_add(fill_elapsed_us);
                         if producer_fill_call_micros.len() < EXCLUSIVE_PERF_MAX_SAMPLES_PER_INTERVAL {
                             producer_fill_call_micros.push(fill_elapsed_us);
                         }
@@ -2068,32 +2094,63 @@ mod wasapi_probe {
                             let elapsed_seconds =
                                 producer_perf_started.elapsed().as_secs_f64().max(1e-6);
                             producer_fill_call_micros.sort_unstable();
+                            producer_send_wait_call_micros.sort_unstable();
                             let fill_p50 =
                                 percentile_from_sorted(&producer_fill_call_micros, 50.0);
                             let fill_p95 =
                                 percentile_from_sorted(&producer_fill_call_micros, 95.0);
                             let fill_p99 =
                                 percentile_from_sorted(&producer_fill_call_micros, 99.0);
+                            let send_wait_p50 =
+                                percentile_from_sorted(&producer_send_wait_call_micros, 50.0);
+                            let send_wait_p95 =
+                                percentile_from_sorted(&producer_send_wait_call_micros, 95.0);
+                            let send_wait_p99 =
+                                percentile_from_sorted(&producer_send_wait_call_micros, 99.0);
                             let realtime_factor = if producer_samples_per_second > 0.0 {
                                 (producer_fill_samples as f64 / producer_samples_per_second)
                                     / elapsed_seconds
                             } else {
                                 0.0
                             };
+                            let compute_seconds =
+                                (producer_fill_compute_micros as f64 / 1_000_000.0).max(1e-6);
+                            let compute_factor = if producer_samples_per_second > 0.0 {
+                                (producer_fill_samples as f64 / producer_samples_per_second)
+                                    / compute_seconds
+                            } else {
+                                0.0
+                            };
+                            let queue_wait_ratio_percent =
+                                (producer_send_wait_micros as f64 / 1_000_000.0)
+                                    / elapsed_seconds
+                                    * 100.0;
                             eprintln!(
-                                "[NativeAudioSidecar] exclusive producer perf 1s path={} realtimeFactor={:.3}x fill(calls/samples/p50/p95/p99 us)={}/{}/{}/{}/{}",
+                                "[NativeAudioSidecar] exclusive producer perf 1s path={} realtimeFactor={:.3}x computeFactor={:.3}x queueWait={:.1}% blockedCalls={} fullRetries={} fill(calls/samples/p50/p95/p99 us)={}/{}/{}/{}/{} sendWait(p50/p95/p99 us)={}/{}/{}",
                                 producer_conversion_path_label,
                                 realtime_factor,
+                                compute_factor,
+                                queue_wait_ratio_percent,
+                                producer_send_blocked_calls,
+                                producer_send_full_retries,
                                 producer_fill_calls,
                                 producer_fill_samples,
                                 fill_p50,
                                 fill_p95,
-                                fill_p99
+                                fill_p99,
+                                send_wait_p50,
+                                send_wait_p95,
+                                send_wait_p99
                             );
                             producer_perf_started = Instant::now();
                             producer_fill_calls = 0;
                             producer_fill_samples = 0;
+                            producer_fill_compute_micros = 0;
                             producer_fill_call_micros.clear();
+                            producer_send_wait_micros = 0;
+                            producer_send_wait_call_micros.clear();
+                            producer_send_full_retries = 0;
+                            producer_send_blocked_calls = 0;
                         }
 
                         if added_samples == 0 {
@@ -2122,6 +2179,8 @@ mod wasapi_probe {
                         }
 
                         let mut outgoing = ProducerMessage::Samples(chunk);
+                        let send_wait_started_at = Instant::now();
+                        let mut send_full_retries_for_call = 0u64;
                         loop {
                             if producer_stop_flag_for_thread.load(Ordering::Relaxed) {
                                 return;
@@ -2130,10 +2189,25 @@ mod wasapi_probe {
                                 Ok(()) => break,
                                 Err(TrySendError::Full(message)) => {
                                     outgoing = message;
+                                    send_full_retries_for_call =
+                                        send_full_retries_for_call.saturating_add(1);
                                     thread::sleep(Duration::from_millis(1));
                                 }
                                 Err(TrySendError::Disconnected(_)) => return,
                             }
+                        }
+                        let send_wait_elapsed_us =
+                            send_wait_started_at.elapsed().as_micros().min(u64::MAX as u128) as u64;
+                        producer_send_wait_micros =
+                            producer_send_wait_micros.saturating_add(send_wait_elapsed_us);
+                        if producer_send_wait_call_micros.len() < EXCLUSIVE_PERF_MAX_SAMPLES_PER_INTERVAL {
+                            producer_send_wait_call_micros.push(send_wait_elapsed_us);
+                        }
+                        producer_send_full_retries = producer_send_full_retries
+                            .saturating_add(send_full_retries_for_call);
+                        if send_full_retries_for_call > 0 {
+                            producer_send_blocked_calls =
+                                producer_send_blocked_calls.saturating_add(1);
                         }
                     }
                 });
@@ -2201,6 +2275,14 @@ mod wasapi_probe {
                         .record_pending_samples(pending_samples.len().saturating_sub(pending_start));
                     perf_window.maybe_log_interval(sample_rate, channels, 0, &conversion_path_label);
                 }
+                let mut startup_fade_in = StartupFadeInState::new(sample_rate);
+                if startup_fade_in.remaining_frames() > 0 {
+                    eprintln!(
+                        "[NativeAudioSidecar] exclusive startup fade-in {} frames (~{:.3}s)",
+                        startup_fade_in.remaining_frames(),
+                        startup_fade_in.remaining_frames() as f64 / sample_rate as f64
+                    );
+                }
                 let initial_available_samples = pending_samples.len().saturating_sub(pending_start);
                 let initial_available_frames = initial_available_samples / channels;
                 if initial_available_frames > 0 {
@@ -2230,6 +2312,8 @@ mod wasapi_probe {
                         &pending_samples[pending_start..pending_start + initial_samples_to_write],
                         resample_pre_gain,
                         volume,
+                        Some(&mut startup_fade_in),
+                        None,
                     );
 
                     render_client
@@ -2264,12 +2348,40 @@ mod wasapi_probe {
                         error,
                     )
                 })?;
+                started_flag.store(true, Ordering::Relaxed);
 
                 let mut consecutive_empty_padding = 0usize;
                 let mut underrun_observations = 0u64;
                 let mut underrun_window_open = false;
                 loop {
                     if stop_receiver.try_recv().is_ok() {
+                        match write_stop_fade_out(
+                            &audio_client,
+                            &render_client,
+                            channels,
+                            sample_format,
+                            resample_pre_gain,
+                            volume,
+                            sample_rate,
+                            buffer_frame_count as usize,
+                            &mut pending_samples,
+                            &mut pending_start,
+                        ) {
+                            Ok(faded_frames) if faded_frames > 0 => {
+                                eprintln!(
+                                    "[NativeAudioSidecar] exclusive stop fade-out wrote {} frames (~{:.3}s)",
+                                    faded_frames,
+                                    faded_frames as f64 / sample_rate as f64
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                eprintln!(
+                                    "[NativeAudioSidecar] exclusive stop fade-out skipped: {} ({})",
+                                    error.message, error.code
+                                );
+                            }
+                        }
                         perf_window.flush_interval(
                             sample_rate,
                             channels,
@@ -2412,6 +2524,8 @@ mod wasapi_probe {
                         &pending_samples[pending_start..pending_start + writable_samples],
                         resample_pre_gain,
                         volume,
+                        Some(&mut startup_fade_in),
+                        None,
                     );
 
                     render_client
@@ -2475,6 +2589,7 @@ mod wasapi_probe {
 mod wasapi_probe {
     use crate::audio::ParametricEqConfig;
     use crate::error::ExclusiveProbeError;
+    use std::sync::atomic::AtomicBool;
     use std::sync::mpsc::Receiver;
     use std::sync::Arc;
 
@@ -2487,6 +2602,7 @@ mod wasapi_probe {
 
     pub(crate) fn run_default_exclusive_playback(
         _audio_data: Arc<[u8]>,
+        _started_flag: Arc<AtomicBool>,
         _start_at_seconds: f64,
         _playback_rate: f64,
         _loop_enabled: bool,

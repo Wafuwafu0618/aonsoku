@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import {
   OVERSAMPLING_ENGINE_PREFERENCES,
+  OVERSAMPLING_LEGACY_PRESET_IDS,
   OVERSAMPLING_PROCESSING_OUTPUT_APIS,
   OVERSAMPLING_PRESET_IDS,
   OVERSAMPLING_TARGET_RATE_POLICIES,
@@ -34,7 +35,10 @@ import {
   useOversamplingState,
 } from '@/store/player.store'
 
-const oversamplingPresets: OversamplingPresetId[] = [...OVERSAMPLING_PRESET_IDS]
+const oversamplingPresets: OversamplingPresetId[] = [
+  ...OVERSAMPLING_PRESET_IDS,
+  ...OVERSAMPLING_LEGACY_PRESET_IDS,
+]
 const oversamplingEnginePreferences: OversamplingEnginePreference[] = [
   ...OVERSAMPLING_ENGINE_PREFERENCES,
 ]

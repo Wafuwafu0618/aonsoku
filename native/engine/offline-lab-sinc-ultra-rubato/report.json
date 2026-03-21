@@ -1,0 +1,63 @@
+{
+  "source": "C:\\aonsoku\\cypress\\fixtures\\song.mp3",
+  "sourceSampleRateHz": 44100,
+  "sourceChannels": 2,
+  "sourceDurationSeconds": 207.0987755102041,
+  "targetSampleRateHz": 352800,
+  "writeWav": false,
+  "outputDir": "C:\\aonsoku\\native\\engine\\offline-lab-sinc-ultra-rubato",
+  "notes": [
+    "Target sample rate was normalized from 384000 Hz to 352800 Hz to match source family (44100 Hz).",
+    "Decoder backend: symphonia",
+    "Forced oversampling engine: rubato-sinc",
+    "Oversampling engine for 'sinc-ultra': rubato-sinc",
+    "[impulse:sinc-ultra] Oversampling engine for 'sinc-ultra': rubato-sinc"
+  ],
+  "cases": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "rubato-sinc",
+      "frames": 73089008,
+      "durationSeconds": 207.16839002267574,
+      "processingTimeMs": 103838.6049,
+      "peakDbfs": 0.8281701651285212,
+      "truePeakDbfs": 0.8281701651285212,
+      "rmsDbfs": -10.849644052135849,
+      "crestFactorDb": 11.67781421726437,
+      "clipSamples": 113,
+      "clipRatio": 7.730300567220723e-7,
+      "wavPath": null
+    }
+  ],
+  "comparisons": [],
+  "impulseAnalyses": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "rubato-sinc",
+      "impulseInputFrames": 131072,
+      "impulseOutputFrames": 1064944,
+      "fftSize": 2097152,
+      "effectiveNyquistHz": 22050.0,
+      "passbandEndHz": 20947.5,
+      "passbandPeakDb": 17.04962688098473,
+      "stopbandStartHz": 22050.0,
+      "stopbandEndHz": 176400.0,
+      "stopbandPeakHz": 139276.5895843506,
+      "stopbandPeakDb": -96.27108911304114,
+      "stopbandAttenuationDb": -113.32071599402587,
+      "stopbandMedianDb": -118.48158027735516,
+      "stopbandP95Db": -108.15785970445232,
+      "stopbandMedianAttenuationDb": -135.5312071583399,
+      "stopbandP95AttenuationDb": -125.20748658543704,
+      "impulseWavPath": null
+    }
+  ]
+}

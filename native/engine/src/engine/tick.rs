@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Instant;
 
 use crate::protocol::{emit_command_error, emit_simple_event};
 use crate::runtime::AudioRuntime;
@@ -27,7 +28,15 @@ pub fn run_tick(state: &mut EngineState, runtime: &mut AudioRuntime) -> io::Resu
         return Ok(());
     }
 
-    let ended_by_clock = state.advance_clock();
+    let should_advance_clock = runtime.should_advance_playback_clock(state.output_mode);
+    let ended_by_clock = if should_advance_clock {
+        state.advance_clock()
+    } else {
+        // Keep the monotonic baseline fresh so startup/prefill time does not
+        // jump the UI position once actual audio rendering begins.
+        state.last_tick_instant = Some(Instant::now());
+        false
+    };
     let ended_by_sink = runtime.is_sink_empty();
 
     emit_simple_event(

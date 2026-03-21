@@ -65,11 +65,13 @@ cargo run --release --bin offline-oversampling-lab -- \
 - `--impulse-frames <n>`: インパルス入力長（既定 `65536`）
 - `--write-impulse-wav`: インパルス応答WAVを出力（`--analyze-impulse` と `--output-dir` 必須）
 - `--stopband-start-hz <hz>`: ストップバンド評価開始周波数（未指定時は自動）
+- `--force-engine <auto|fft-ola|short-fir-direct|rubato-sinc>`: オーバーサンプリング実行エンジンを強制（既定 `auto`）
 
 ## 補足
 
 - このCLIは現在のネイティブ実装に合わせた検証ツールです。
 - 一部フィルタIDはネイティブHQプロファイルに未マップで、`poly-sinc-mp` 相当にフォールバックします。該当時は `notes` に明記されます。
+- `--force-engine` を指定すると、`notes` と `cases[].oversamplingEngine` に実際に使われたエンジンが出力されます。
 - `truePeakDbfs` は簡易推定です。厳密測定が必要な場合は外部メータ併用を推奨します。
 - 長尺音源ではメモリ使用量が増えるため、まずは短い素材・少ないフィルタ数で試すのを推奨します。
 

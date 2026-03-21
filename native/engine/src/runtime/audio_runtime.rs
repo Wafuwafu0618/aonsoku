@@ -28,6 +28,7 @@ pub struct LoadedAudio {
 #[derive(Clone)]
 pub struct ExclusivePlaybackParams {
     pub audio_data: Arc<[u8]>,
+    pub generation_id: u64,
     pub start_at_seconds: f64,
     pub playback_rate: f64,
     pub loop_enabled: bool,
@@ -38,7 +39,9 @@ pub struct ExclusivePlaybackParams {
 }
 
 pub struct ExclusivePlaybackSession {
+    pub generation_id: u64,
     pub stop_sender: mpsc::Sender<()>,
+    pub started: Arc<AtomicBool>,
     pub finished: Arc<AtomicBool>,
     pub ended_naturally: Arc<AtomicBool>,
     pub join_handle: Option<thread::JoinHandle<()>>,
@@ -51,6 +54,10 @@ impl ExclusivePlaybackSession {
 
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Relaxed)
+    }
+
+    pub fn is_started(&self) -> bool {
+        self.started.load(Ordering::Relaxed)
     }
 
     pub fn ended_naturally(&self) -> bool {
@@ -67,6 +74,7 @@ pub struct AudioRuntime {
     pub exclusive_prepared_playback: Option<ExclusivePlaybackParams>,
     pub exclusive_playback: Option<ExclusivePlaybackSession>,
     pub exclusive_playback_ended: bool,
+    pub exclusive_generation_counter: u64,
     pub exclusive_lock: Option<File>,
     pub exclusive_lock_path: PathBuf,
     pub active_output_mode: OutputMode,
@@ -91,6 +99,7 @@ impl Default for AudioRuntime {
             exclusive_prepared_playback: None,
             exclusive_playback: None,
             exclusive_playback_ended: false,
+            exclusive_generation_counter: 0,
             exclusive_lock: None,
             exclusive_lock_path: std::env::temp_dir().join(EXCLUSIVE_LOCK_FILE_NAME),
             active_output_mode: OutputMode::WasapiShared,
@@ -434,8 +443,9 @@ impl AudioRuntime {
     fn stop_exclusive_playback(&mut self, reason: &str) {
         if let Some(mut session) = self.exclusive_playback.take() {
             eprintln!(
-                "[NativeAudioSidecar] stop_exclusive_playback reason={} activeSession=true",
-                reason
+                "[NativeAudioSidecar] stop_exclusive_playback reason={} activeSession=true generation={}",
+                reason,
+                session.generation_id
             );
             session.request_stop();
             if let Some(handle) = session.join_handle.take() {
@@ -473,8 +483,18 @@ impl AudioRuntime {
         );
 
         self.stop_exclusive_playback("prepare_exclusive_playback");
+        let generation_id = self.exclusive_generation_counter.saturating_add(1);
+        self.exclusive_generation_counter = generation_id;
+        eprintln!(
+            "[NativeAudioSidecar] exclusive prepare generation={} startAt={:.3}s rate={:.3} loop={}",
+            generation_id,
+            state.current_time_seconds.max(0.0),
+            state.playback_rate.max(0.01),
+            state.loop_enabled
+        );
         self.exclusive_prepared_playback = Some(ExclusivePlaybackParams {
             audio_data: loaded_audio.data,
+            generation_id,
             start_at_seconds: state.current_time_seconds.max(0.0),
             playback_rate: state.playback_rate.max(0.01),
             loop_enabled: state.loop_enabled,
@@ -506,16 +526,20 @@ impl AudioRuntime {
             .ok_or_else(|| "No prepared exclusive playback is available.".to_string())?;
 
         let (stop_sender, stop_receiver) = mpsc::channel::<()>();
+        let started = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
         let ended_naturally = Arc::new(AtomicBool::new(false));
         self.exclusive_playback_ended = false;
 
+        let generation_id = params.generation_id;
+        let started_for_worker = Arc::clone(&started);
         let finished_for_worker = Arc::clone(&finished);
         let ended_naturally_for_worker = Arc::clone(&ended_naturally);
 
         let join_handle = thread::spawn(move || {
             let playback_result = run_default_exclusive_playback(
                 params.audio_data,
+                started_for_worker,
                 params.start_at_seconds,
                 params.playback_rate,
                 params.loop_enabled,
@@ -542,8 +566,15 @@ impl AudioRuntime {
             finished_for_worker.store(true, Ordering::Relaxed);
         });
 
+        eprintln!(
+            "[NativeAudioSidecar] exclusive start generation={} mode={}",
+            generation_id,
+            self.active_output_mode.as_str()
+        );
         self.exclusive_playback = Some(ExclusivePlaybackSession {
+            generation_id,
             stop_sender,
+            started,
             finished,
             ended_naturally,
             join_handle: Some(join_handle),
@@ -696,5 +727,17 @@ impl AudioRuntime {
         }
 
         false
+    }
+
+    pub fn should_advance_playback_clock(&mut self, mode: OutputMode) -> bool {
+        if mode != OutputMode::WasapiExclusive {
+            return true;
+        }
+
+        self.cleanup_finished_exclusive_playback();
+        self.exclusive_playback
+            .as_ref()
+            .map(|session| session.is_started())
+            .unwrap_or(false)
     }
 }

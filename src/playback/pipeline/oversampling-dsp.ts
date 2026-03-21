@@ -23,6 +23,122 @@ interface FilterKernelSpec {
 }
 
 const FILTER_KERNEL_SPECS: Record<string, FilterKernelSpec> = {
+  'fir-lp': {
+    taps: 511,
+    cutoff: 0.476,
+  },
+  'fir-mp': {
+    taps: 511,
+    cutoff: 0.475,
+  },
+  'fir-asym': {
+    taps: 511,
+    cutoff: 0.475,
+  },
+  'fir-minring-lp': {
+    taps: 511,
+    cutoff: 0.476,
+  },
+  'fir-minring-mp': {
+    taps: 511,
+    cutoff: 0.475,
+  },
+  fft: {
+    taps: 1023,
+    cutoff: 0.49,
+  },
+  'sinc-s-mp': {
+    taps: 255,
+    cutoff: 0.46,
+  },
+  'sinc-m-mp': {
+    taps: 511,
+    cutoff: 0.475,
+  },
+  'sinc-m-lp': {
+    taps: 511,
+    cutoff: 0.476,
+  },
+  'sinc-l-lp': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'sinc-l-mp': {
+    taps: 1535,
+    cutoff: 0.489,
+  },
+  'sinc-l-ip': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'sinc-m-lp-ext': {
+    taps: 767,
+    cutoff: 0.488,
+  },
+  'sinc-m-lp-ext2': {
+    taps: 1023,
+    cutoff: 0.49,
+  },
+  'sinc-xl-lp': {
+    taps: 2047,
+    cutoff: 0.492,
+  },
+  'sinc-xl-mp': {
+    taps: 2047,
+    cutoff: 0.491,
+  },
+  'sinc-m-gauss': {
+    taps: 767,
+    cutoff: 0.485,
+  },
+  'sinc-l-gauss': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'sinc-xl-gauss': {
+    taps: 2047,
+    cutoff: 0.492,
+  },
+  'sinc-xl-gauss-apod': {
+    taps: 2047,
+    cutoff: 0.492,
+  },
+  'sinc-hires-lp': {
+    taps: 1535,
+    cutoff: 0.49,
+  },
+  'sinc-hires-mp': {
+    taps: 1535,
+    cutoff: 0.489,
+  },
+  'sinc-hb': {
+    taps: 1023,
+    cutoff: 0.49,
+  },
+  'sinc-hb-l': {
+    taps: 1535,
+    cutoff: 0.492,
+  },
+  'sinc-mega': {
+    taps: 3071,
+    cutoff: 0.495,
+  },
+  'sinc-ultra': {
+    taps: 4095,
+    cutoff: 0.496,
+  },
+  iir: {
+    taps: 127,
+    cutoff: 0.45,
+  },
+  'poly-1': {
+    taps: 63,
+    cutoff: 0.42,
+  },
+  'poly-2': {
+    taps: 95,
+    cutoff: 0.44,
+  },
   'poly-sinc-short-mp': {
     taps: 255,
     cutoff: 0.46,

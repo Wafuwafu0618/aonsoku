@@ -1,0 +1,58 @@
+{
+  "source": "C:\\aonsoku\\cypress\\fixtures\\song.mp3",
+  "sourceSampleRateHz": 44100,
+  "sourceChannels": 2,
+  "sourceDurationSeconds": 207.0987755102041,
+  "targetSampleRateHz": 352800,
+  "writeWav": false,
+  "outputDir": "C:\\aonsoku\\native\\engine\\offline-lab-sinc-ultra",
+  "notes": [
+    "Target sample rate was normalized from 384000 Hz to 352800 Hz to match source family (44100 Hz).",
+    "Decoder backend: symphonia"
+  ],
+  "cases": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "frames": 73052144,
+      "durationSeconds": 207.06390022675737,
+      "processingTimeMs": 105083.3476,
+      "peakDbfs": 0.8281701651285212,
+      "truePeakDbfs": 0.8281701651285212,
+      "rmsDbfs": -10.847453042779307,
+      "crestFactorDb": 11.675623207907828,
+      "clipSamples": 113,
+      "clipRatio": 7.734201476687666e-7,
+      "wavPath": null
+    }
+  ],
+  "comparisons": [],
+  "impulseAnalyses": [
+    {
+      "filterToken": "sinc-ultra",
+      "filterId": "sinc-ultra",
+      "profileLabel": "sinc-ultra",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "impulseInputFrames": 32768,
+      "impulseOutputFrames": 249840,
+      "fftSize": 262144,
+      "effectiveNyquistHz": 22050.0,
+      "passbandEndHz": 20947.5,
+      "passbandPeakDb": 17.049626879827382,
+      "stopbandStartHz": 22050.0,
+      "stopbandEndHz": 176400.0,
+      "stopbandPeakHz": 139276.7578125,
+      "stopbandPeakDb": -96.2713130870485,
+      "stopbandAttenuationDb": -113.32093996687588,
+      "stopbandMedianDb": -118.48061187788122,
+      "stopbandP95Db": -108.15609982761129,
+      "stopbandMedianAttenuationDb": -135.5302387577086,
+      "stopbandP95AttenuationDb": -125.20572670743866,
+      "impulseWavPath": null
+    }
+  ]
+}

@@ -9,7 +9,7 @@ describe('Oversampling runtime capability', () => {
 
     expect(capability.supportedOutputApis).to.deep.equal(['wasapi-exclusive'])
     expect(capability.availableEngines).to.deep.equal(['cpu'])
-    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 65536 })
+    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 2_097_152 })
   })
 
   it('keeps tap limits for all available engines', () => {
@@ -21,8 +21,8 @@ describe('Oversampling runtime capability', () => {
     expect(capability.supportedOutputApis).to.deep.equal([])
     expect(capability.availableEngines).to.deep.equal(['cpu', 'gpu'])
     expect(capability.maxTapCountByEngine).to.deep.equal({
-      cpu: 65536,
-      gpu: 262144,
+      cpu: 2_097_152,
+      gpu: 4_194_304,
     })
   })
 
@@ -34,6 +34,6 @@ describe('Oversampling runtime capability', () => {
 
     expect(capability.supportedOutputApis).to.deep.equal([])
     expect(capability.availableEngines).to.deep.equal(['cpu'])
-    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 65536 })
+    expect(capability.maxTapCountByEngine).to.deep.equal({ cpu: 2_097_152 })
   })
 })

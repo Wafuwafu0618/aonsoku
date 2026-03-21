@@ -7,8 +7,8 @@ import {
 } from './types'
 
 const TAP_LIMITS: Record<OversamplingEngine, number> = {
-  cpu: 65536,
-  gpu: 262144,
+  cpu: 2_097_152,
+  gpu: 4_194_304,
 }
 
 function dedupeOrdered<T extends string>(
