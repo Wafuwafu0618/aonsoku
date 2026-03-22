@@ -75,6 +75,8 @@ export function Player() {
   const podcast = podcastList[currentSongIndex]
   const isLocalSong =
     currentQueueItem?.source === 'local' || song?.id?.startsWith('local:')
+  const isSpotifySong =
+    currentQueueItem?.source === 'spotify' || song?.id?.startsWith('spotify:')
 
   const currentSongSrc = useMemo(() => {
     if (!song) return ''
@@ -88,8 +90,16 @@ export function Player() {
       return encodeURI(fileUrl)
     }
 
+    if (isSpotifySong) {
+      if (currentSongSourceId.startsWith('spotify:')) {
+        return currentSongSourceId
+      }
+
+      return `spotify:${currentSongSourceId}`
+    }
+
     return getSongStreamUrl(currentSongSourceId)
-  }, [currentSongSourceId, isLocalSong, song])
+  }, [currentSongSourceId, isLocalSong, isSpotifySong, song])
 
   const getAudioRef = useCallback(() => {
     if (isRadio) return radioRef

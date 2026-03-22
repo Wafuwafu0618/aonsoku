@@ -2,6 +2,7 @@ import { electronApp, optimizer, platform } from '@electron-toolkit/utils'
 import { app } from 'electron'
 import { createAppMenu } from './core/menu'
 import { nativeAudioSidecar } from './core/native-audio-sidecar'
+import { spotifyConnectSidecar } from './core/spotify-connect-sidecar'
 import { initAutoUpdater } from './core/updater'
 import { createWindow, mainWindow } from './window'
 
@@ -68,6 +69,9 @@ if (!instanceLock) {
     isQuitting = true
     nativeAudioSidecar.shutdown().catch((error) => {
       console.error('[NativeAudioSidecar] shutdown failed:', error)
+    })
+    spotifyConnectSidecar.shutdown().catch((error) => {
+      console.error('[SpotifyConnectSidecar] shutdown failed:', error)
     })
   })
 

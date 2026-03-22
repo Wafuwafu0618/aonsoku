@@ -8,6 +8,10 @@ import {
   OverlayColors,
   ParametricEqFileEntry,
   PlayerStatePayload,
+  SpotifyConnectOAuthAuthorizeRequest,
+  SpotifyConnectOAuthRefreshRequest,
+  SpotifyConnectPlayUriRequest,
+  SpotifyConnectSetActiveDeviceRequest,
 } from '../../preload/types'
 import { isQuitting } from '../index'
 import { tray, updateTray } from '../tray'
@@ -18,6 +22,11 @@ import {
   setDiscordRpcActivity,
 } from './discordRpc'
 import { nativeAudioSidecar } from './native-audio-sidecar'
+import {
+  spotifyConnectOAuthAuthorize,
+  spotifyConnectOAuthRefresh,
+} from './spotify-connect-oauth'
+import { spotifyConnectSidecar } from './spotify-connect-sidecar'
 import { playerState } from './playerState'
 import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
 import { setTaskbarButtons } from './taskbar'
@@ -144,6 +153,10 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   nativeAudioSidecar.setEventListener((event) => {
     if (window.isDestroyed()) return
     window.webContents.send(IpcChannels.NativeAudioEvent, event)
+  })
+  spotifyConnectSidecar.setEventListener((event) => {
+    if (window.isDestroyed()) return
+    window.webContents.send(IpcChannels.SpotifyConnectEvent, event)
   })
 
   ipcMain.on(IpcChannels.ToggleFullscreen, (_, isFullscreen: boolean) => {
@@ -353,4 +366,57 @@ export function setupIpcEvents(window: BrowserWindow | null) {
 
   ipcMain.removeHandler(IpcChannels.NativeAudioDispose)
   ipcMain.handle(IpcChannels.NativeAudioDispose, () => nativeAudioSidecar.dispose())
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectInitialize)
+  ipcMain.handle(IpcChannels.SpotifyConnectInitialize, (_, payload) =>
+    spotifyConnectSidecar.initialize(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectStartReceiver)
+  ipcMain.handle(IpcChannels.SpotifyConnectStartReceiver, () =>
+    spotifyConnectSidecar.startReceiver(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectStatus)
+  ipcMain.handle(IpcChannels.SpotifyConnectStatus, () =>
+    spotifyConnectSidecar.status(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectListDevices)
+  ipcMain.handle(IpcChannels.SpotifyConnectListDevices, () =>
+    spotifyConnectSidecar.listDevices(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectSetActiveDevice)
+  ipcMain.handle(
+    IpcChannels.SpotifyConnectSetActiveDevice,
+    (_, payload: SpotifyConnectSetActiveDeviceRequest) =>
+      spotifyConnectSidecar.setActiveDevice(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectPlayUri)
+  ipcMain.handle(
+    IpcChannels.SpotifyConnectPlayUri,
+    (_, payload: SpotifyConnectPlayUriRequest) =>
+      spotifyConnectSidecar.playUri(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectOAuthAuthorize)
+  ipcMain.handle(
+    IpcChannels.SpotifyConnectOAuthAuthorize,
+    (_, payload: SpotifyConnectOAuthAuthorizeRequest) =>
+      spotifyConnectOAuthAuthorize(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectOAuthRefresh)
+  ipcMain.handle(
+    IpcChannels.SpotifyConnectOAuthRefresh,
+    (_, payload: SpotifyConnectOAuthRefreshRequest) =>
+      spotifyConnectOAuthRefresh(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.SpotifyConnectDispose)
+  ipcMain.handle(IpcChannels.SpotifyConnectDispose, () =>
+    spotifyConnectSidecar.dispose(),
+  )
 }

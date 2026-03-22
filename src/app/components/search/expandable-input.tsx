@@ -30,30 +30,41 @@ export function ExpandableSearchInput({ ...props }: SearchInputProps) {
   const setParams = useCallback(
     (value: string) => {
       const params = new URLSearchParams()
+      const source = searchParams.get(AlbumsSearchParams.Source)
+
+      if (source) {
+        params.set(AlbumsSearchParams.Source, source)
+      }
 
       if (value) {
-        params.append(AlbumsSearchParams.MainFilter, AlbumsFilters.Search)
-        params.append(AlbumsSearchParams.Query, value)
+        params.set(AlbumsSearchParams.MainFilter, AlbumsFilters.Search)
+        params.set(AlbumsSearchParams.Query, value)
 
         setSearchParams(params)
       } else {
+        setSearchParams(params)
         inputRef.current?.blur()
       }
     },
-    [setSearchParams],
+    [searchParams, setSearchParams],
   )
 
   const close = useCallback(() => {
     setSearchActive(false)
     setSearchValue('')
     if (filter !== '' || query !== '') {
-      setSearchParams(new URLSearchParams())
+      const params = new URLSearchParams()
+      const source = searchParams.get(AlbumsSearchParams.Source)
+      if (source) {
+        params.set(AlbumsSearchParams.Source, source)
+      }
+      setSearchParams(params)
     }
     if (inputRef.current) {
       inputRef.current.blur()
       inputRef.current.value = ''
     }
-  }, [filter, query, setSearchParams])
+  }, [filter, query, searchParams, setSearchParams])
 
   const toggleSearchActive = useCallback(() => {
     if (!searchActive) {

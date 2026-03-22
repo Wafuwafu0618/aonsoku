@@ -8,6 +8,10 @@ import {
   searchTracksPage,
 } from '@/local-library'
 import { SearchQueryOptions } from '@/service/search'
+import {
+  getSpotifySongYearFromReleaseDate,
+  spotifySearchTracks,
+} from '@/service/spotify'
 import { subsonic } from '@/service/subsonic'
 import { useAppStore } from '@/store/app.store'
 import { ISong } from '@/types/responses/song'
@@ -17,7 +21,7 @@ const NAVIDROME_COUNT_PAGE_SIZE = 100
 type SongSearchParams = Required<
   Pick<SearchQueryOptions, 'query' | 'songCount' | 'songOffset'>
 > & {
-  source?: 'all' | 'navidrome' | 'local'
+  source?: 'all' | 'navidrome' | 'local' | 'spotify'
 }
 
 export interface SongSearchResult {
@@ -28,6 +32,71 @@ export interface SongSearchResult {
 
 const navidromeSongCountCache = new Map<string, number>()
 const navidromeSongCountInFlight = new Map<string, Promise<number>>()
+
+const spotifyDefaultReplayGain = {
+  trackGain: 0,
+  trackPeak: 1,
+  albumGain: 0,
+  albumPeak: 1,
+}
+
+function mapSpotifyTrackToISong(track: Awaited<
+  ReturnType<typeof spotifySearchTracks>
+>['tracks'][number]): ISong {
+  const primaryArtist = track.artists[0]
+  const artists = track.artists
+    .filter((artist) => Boolean(artist.name))
+    .map((artist) => ({
+      id: artist.uri || `spotify:artist:${artist.id}`,
+      name: artist.name,
+    }))
+
+  const artistName =
+    artists.map((artist) => artist.name).join(', ') ||
+    primaryArtist?.name ||
+    'Unknown Artist'
+  const artistId = primaryArtist?.uri || `spotify:artist:${primaryArtist?.id ?? ''}`
+  const releaseYear = getSpotifySongYearFromReleaseDate(track.album.releaseDate)
+
+  return {
+    id: track.uri,
+    parent: '',
+    isDir: false,
+    title: track.title,
+    album: track.album.title,
+    artist: artistName,
+    track: track.trackNumber,
+    year: releaseYear,
+    genre: '',
+    coverArt: track.album.coverArtUrl ?? '',
+    size: 0,
+    contentType: 'audio/spotify',
+    suffix: 'spotify',
+    duration: track.durationSeconds,
+    bitRate: 0,
+    path: track.uri,
+    discNumber: track.discNumber,
+    created: new Date(0).toISOString(),
+    albumId: track.album.uri,
+    artistId,
+    type: 'music',
+    isVideo: false,
+    bpm: 0,
+    comment: '',
+    sortName: track.title,
+    mediaType: 'music',
+    musicBrainzId: '',
+    genres: [],
+    replayGain: spotifyDefaultReplayGain,
+    artists,
+    displayArtist: artistName,
+    albumArtists: track.album.artists.map((artist) => ({
+      id: artist.uri || `spotify:artist:${artist.id}`,
+      name: artist.name,
+    })),
+    displayAlbumArtist: track.album.artists.map((artist) => artist.name).join(', '),
+  }
+}
 
 function sortSongsForArtist(songA: ISong, songB: ISong): number {
   const albumCompare = songA.album.localeCompare(songB.album)
@@ -196,6 +265,24 @@ export async function songsSearch(
           ? songOffset + songCount
           : null,
       totalCount: localPage.totalCount,
+    }
+  }
+
+  if (source === 'spotify') {
+    const spotifyPage = await spotifySearchTracks({
+      query,
+      limit: songCount,
+      offset: songOffset,
+    })
+
+    const songs = spotifyPage.tracks.map(mapSpotifyTrackToISong)
+    const totalCount = spotifyPage.totalCount
+
+    return {
+      songs,
+      nextOffset:
+        songOffset + songs.length < totalCount ? songOffset + songCount : null,
+      totalCount,
     }
   }
 

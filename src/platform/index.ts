@@ -25,6 +25,18 @@ export {
   readLocalLibraryFile,
 } from './adapters/local-library-adapter'
 export { pickParametricEqFile } from './adapters/parametric-eq-adapter'
+export {
+  onSpotifyConnectEvent,
+  spotifyConnectListDevices,
+  spotifyConnectOAuthAuthorize,
+  spotifyConnectOAuthRefresh,
+  spotifyConnectPlayUri,
+  spotifyConnectDispose,
+  spotifyConnectInitialize,
+  spotifyConnectSetActiveDevice,
+  spotifyConnectStartReceiver,
+  spotifyConnectStatus,
+} from './adapters/spotify-connect-adapter'
 
 // Player Adapter
 export {

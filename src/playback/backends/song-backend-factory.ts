@@ -1,20 +1,26 @@
+import { PlaybackBackendId } from '@/domain/playback-backend'
 import { NativeAudioOutputMode } from '@/platform/contracts/desktop-contract'
 import { PlaybackBackend } from '@/playback/backend'
 import { InternalPlaybackBackend } from './internal-backend'
 import { NativePlaybackBackend } from './native-backend'
+import { SpotifyConnectPlaybackBackend } from './spotify-connect-backend'
 
 export interface SongPlaybackBackendFactoryInput {
   audio: HTMLAudioElement
-  useNativeBackend: boolean
+  backendId: PlaybackBackendId
   outputMode: NativeAudioOutputMode
 }
 
 export function createSongPlaybackBackend({
   audio,
-  useNativeBackend,
+  backendId,
   outputMode,
 }: SongPlaybackBackendFactoryInput): PlaybackBackend {
-  if (useNativeBackend) {
+  if (backendId === 'spotify-connect') {
+    return new SpotifyConnectPlaybackBackend()
+  }
+
+  if (backendId === 'native') {
     return new NativePlaybackBackend({ outputMode })
   }
 

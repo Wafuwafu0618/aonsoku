@@ -6,6 +6,7 @@ import {
   NativeAudioEvent,
   NativeAudioOutputMode,
   PlayerStateListenerActions,
+  SpotifyConnectEvent,
 } from './types'
 
 // Custom APIs for renderer
@@ -122,6 +123,31 @@ const api: IAonsokuAPI = {
   },
   removeNativeAudioEventListener: () => {
     ipcRenderer.removeAllListeners(IpcChannels.NativeAudioEvent)
+  },
+  spotifyConnectInitialize: (payload) =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectInitialize, payload),
+  spotifyConnectStartReceiver: () =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectStartReceiver),
+  spotifyConnectStatus: () => ipcRenderer.invoke(IpcChannels.SpotifyConnectStatus),
+  spotifyConnectListDevices: () =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectListDevices),
+  spotifyConnectSetActiveDevice: (payload) =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectSetActiveDevice, payload),
+  spotifyConnectPlayUri: (payload) =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectPlayUri, payload),
+  spotifyConnectOAuthAuthorize: (payload) =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectOAuthAuthorize, payload),
+  spotifyConnectOAuthRefresh: (payload) =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectOAuthRefresh, payload),
+  spotifyConnectDispose: () => ipcRenderer.invoke(IpcChannels.SpotifyConnectDispose),
+  spotifyConnectEventListener: (func) => {
+    ipcRenderer.on(
+      IpcChannels.SpotifyConnectEvent,
+      (_, event: SpotifyConnectEvent) => func(event),
+    )
+  },
+  removeSpotifyConnectEventListener: () => {
+    ipcRenderer.removeAllListeners(IpcChannels.SpotifyConnectEvent)
   },
 }
 

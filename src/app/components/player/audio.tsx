@@ -21,6 +21,7 @@ import { createSongPlaybackBackend } from '@/playback/backends/song-backend-fact
 import { PlayerAudioPipeline } from '@/playback/pipeline'
 import { PlaybackEvent } from '@/playback/session-types'
 import {
+  usePlaybackQueueState,
   usePlayerActions,
   usePlayerIsPlaying,
   usePlayerMediaType,
@@ -174,6 +175,7 @@ export function AudioPlayer({
     profile: parametricEqProfile,
   } = useParametricEqState()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
+  const { currentQueueItem } = usePlaybackQueueState()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
     usePlayerActions()
   const { setCapability, setEnabled, setEnginePreference, setOutputApi } =
@@ -203,6 +205,10 @@ export function AudioPlayer({
     : undefined
   const isSelectedOutputApiSupported =
     oversamplingCapability.supportedOutputApis.includes(oversamplingOutputApi)
+  const isSpotifySongSource =
+    isSong &&
+    typeof src === 'string' &&
+    src.toLowerCase().startsWith('spotify:')
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
@@ -233,7 +239,13 @@ export function AudioPlayer({
   const parametricEqForLoad = shouldApplyParametricEq
     ? parametricEqLoadConfig
     : undefined
-  const useWebAudioSongPath = isSong && !useNativeSongBackend
+  const useSpotifyConnectSongBackend =
+    isSong &&
+    (isSpotifySongSource ||
+      currentQueueItem?.source === 'spotify' ||
+      currentQueueItem?.playbackBackend === 'spotify-connect')
+  const useWebAudioSongPath =
+    isSong && !useNativeSongBackend && !useSpotifyConnectSongBackend
   const shouldAttachWebAudioGraph =
     useWebAudioSongPath && (replayGainEnabled || oversamplingEnabled)
 
@@ -436,6 +448,22 @@ export function AudioPlayer({
         return
       }
 
+      if (useSpotifyConnectSongBackend) {
+        const spotifyReason =
+          reason instanceof Error
+            ? reason.message
+            : typeof reason === 'string'
+              ? reason
+              : undefined
+        toast.error(
+          spotifyReason
+            ? `${t('warnings.songError')} (${spotifyReason})`
+            : t('warnings.songError'),
+        )
+        setPlayingState(false)
+        return
+      }
+
       const audio = audioRef.current
       if (!audio) return
 
@@ -463,6 +491,7 @@ export function AudioPlayer({
       setReplayGainError,
       t,
       useNativeSongBackend,
+      useSpotifyConnectSongBackend,
     ],
   )
 
@@ -473,14 +502,18 @@ export function AudioPlayer({
 
     let cancelled = false
 
-    const nextBackendId = useNativeSongBackend ? 'native' : 'internal'
+    const nextBackendId = useSpotifyConnectSongBackend
+      ? 'spotify-connect'
+      : useNativeSongBackend
+        ? 'native'
+        : 'internal'
     const currentBackend = songBackendRef.current
 
     if (!currentBackend || currentBackend.id !== nextBackendId) {
       currentBackend?.dispose()
       songBackendRef.current = createSongPlaybackBackend({
         audio,
-        useNativeBackend: useNativeSongBackend,
+        backendId: nextBackendId,
         outputMode: nativeOutputMode,
       })
     }
@@ -616,6 +649,7 @@ export function AudioPlayer({
     src,
     t,
     useNativeSongBackend,
+    useSpotifyConnectSongBackend,
   ])
   useEffect(() => {
     if (!isSong) return
@@ -683,6 +717,7 @@ export function AudioPlayer({
     handleSongEnded,
     handleSongError,
     isSong,
+    src,
     setCurrentDuration,
     setPlayingState,
     setProgress,

@@ -29,6 +29,13 @@ type ArtistsLinksProps = {
 
 export function TableArtists({ song }: ArtistsLinksProps) {
   const { artists, artistId, artist } = song
+  const isSpotifySong = song.id.startsWith('spotify:')
+
+  if (isSpotifySong) {
+    return (
+      <span className="text-xs text-foreground/70 text-nowrap">{artist}</span>
+    )
+  }
 
   if (artists && artists.length > 1) {
     return <ArtistsLinks song={song} />

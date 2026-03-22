@@ -106,6 +106,10 @@ export function songsColumns(): ColumnDefType<ISong>[] {
         </MemoDataTableColumnHeader>
       ),
       cell: ({ row }) => {
+        if (row.original.id.startsWith('spotify:')) {
+          return row.original.artist
+        }
+
         const { artist, artistId, artists } = row.original
 
         if (artists && artists.length > 1) {
@@ -134,6 +138,12 @@ export function songsColumns(): ColumnDefType<ISong>[] {
         </MemoDataTableColumnHeader>
       ),
       cell: ({ row }) => {
+        if (row.original.id.startsWith('spotify:')) {
+          return (
+            <span className="truncate text-foreground/70">{row.original.album}</span>
+          )
+        }
+
         return (
           <MemoLink
             to={ROUTES.ALBUM.PAGE(row.original.albumId)}

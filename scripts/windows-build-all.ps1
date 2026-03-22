@@ -40,6 +40,16 @@ try {
     }
   }
 
+  Invoke-Step -Name "cargo build (native/spotify-connect-engine)" -Action {
+    Push-Location (Join-Path $repoRoot "native/spotify-connect-engine")
+    try {
+      cargo build
+    }
+    finally {
+      Pop-Location
+    }
+  }
+
   Invoke-Step -Name "npm run electron:build" -Action {
     npm.cmd run electron:build
   }

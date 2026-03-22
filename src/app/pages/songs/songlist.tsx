@@ -1,6 +1,8 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import { ShadowHeader } from '@/app/components/album/shadow-header'
 import { InfinitySongListFallback } from '@/app/components/fallbacks/song-fallbacks'
 import { HeaderTitle } from '@/app/components/header-title'
@@ -16,8 +18,9 @@ import { ColumnFilter } from '@/types/columnFilter'
 import {
   AlbumsFilters,
   AlbumsSearchParams,
-  SourceFilter,
-  SourceFilters,
+  SongSourceFilter,
+  SongSourceFilters,
+  songSourceFilterValues,
 } from '@/utils/albumsFilter'
 import { queryKeys } from '@/utils/queryKeys'
 import { SearchParamsHandler } from '@/utils/searchParamsHandler'
@@ -35,14 +38,14 @@ export default function SongList() {
   const query = getSearchParam<string>(AlbumsSearchParams.Query, '')
   const artistId = getSearchParam<string>(AlbumsSearchParams.ArtistId, '')
   const artistName = getSearchParam<string>(AlbumsSearchParams.ArtistName, '')
-  const sourceFilter = getSearchParam<SourceFilter>(
+  const sourceFilter = getSearchParam<SongSourceFilter>(
     AlbumsSearchParams.Source,
-    SourceFilters.All,
+    SongSourceFilters.All,
   )
 
   const searchFilterIsSet = filter === AlbumsFilters.Search && query !== ''
   const filterByArtist = artistId !== '' && artistName !== ''
-  const sourceFilterIsSet = sourceFilter !== SourceFilters.All
+  const sourceFilterIsSet = sourceFilter !== SongSourceFilters.All
   const hasSomeFilter = searchFilterIsSet || filterByArtist || sourceFilterIsSet
 
   async function fetchSongs({ pageParam = 0 }) {
@@ -58,13 +61,27 @@ export default function SongList() {
     })
   }
 
-  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } =
-    useInfiniteQuery({
+  const {
+    data,
+    isLoading,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+    isError,
+    error,
+  } = useInfiniteQuery({
       queryKey: [queryKeys.song.all, filter, query, artistId, sourceFilter],
       initialPageParam: 0,
       queryFn: fetchSongs,
       getNextPageParam: (lastPage) => lastPage.nextOffset,
     })
+
+  useEffect(() => {
+    if (!isError || !error) return
+
+    const message = error instanceof Error ? error.message : String(error)
+    toast.error(message)
+  }, [error, isError])
 
   const { data: songCountData, isLoading: songCountIsLoading } = useTotalSongs()
 
@@ -114,7 +131,10 @@ export default function SongList() {
 
         <div className="flex gap-2 flex-1 justify-end">
           {filterByArtist && <ClearFilterButton />}
-          <SourceFilterComponent />
+          <SourceFilterComponent
+            options={songSourceFilterValues}
+            defaultFilter={SongSourceFilters.All}
+          />
           <ExpandableSearchInput
             placeholder={t('songs.list.search.placeholder')}
           />

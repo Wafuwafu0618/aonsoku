@@ -140,7 +140,8 @@
     "filter": {
       "all": "すべてのソース",
       "navidrome": "Navidrome",
-      "local": "ローカルライブラリ"
+      "local": "ローカルライブラリ",
+      "spotify": "Spotify"
     }
   },
   "album": {

@@ -51,6 +51,16 @@ export enum IpcChannels {
   NativeAudioSetPlaybackRate = 'native-audio-set-playback-rate',
   NativeAudioDispose = 'native-audio-dispose',
   NativeAudioEvent = 'native-audio-event',
+  SpotifyConnectInitialize = 'spotify-connect-initialize',
+  SpotifyConnectStartReceiver = 'spotify-connect-start-receiver',
+  SpotifyConnectStatus = 'spotify-connect-status',
+  SpotifyConnectListDevices = 'spotify-connect-list-devices',
+  SpotifyConnectSetActiveDevice = 'spotify-connect-set-active-device',
+  SpotifyConnectPlayUri = 'spotify-connect-play-uri',
+  SpotifyConnectOAuthAuthorize = 'spotify-connect-oauth-authorize',
+  SpotifyConnectOAuthRefresh = 'spotify-connect-oauth-refresh',
+  SpotifyConnectDispose = 'spotify-connect-dispose',
+  SpotifyConnectEvent = 'spotify-connect-event',
 }
 
 export interface LocalLibraryDirectoryEntry {
@@ -173,6 +183,134 @@ export interface NativeAudioEvent {
   error?: NativeAudioErrorPayload
 }
 
+export interface SpotifyConnectInitializeRequest {
+  deviceName?: string
+  cacheDir?: string
+  zeroconfPort?: number
+  librespotPath?: string
+  accessToken?: string
+}
+
+export interface SpotifyConnectErrorPayload {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
+export interface SpotifyConnectCommandResult {
+  ok: boolean
+  error?: SpotifyConnectErrorPayload
+}
+
+export interface SpotifyConnectInitializeResult {
+  ok: boolean
+  version: string
+  engine: string
+  message?: string
+  receiverRunning: boolean
+}
+
+export interface SpotifyConnectTrackInfo {
+  spotifyUri: string
+  title?: string
+  artists?: string[]
+  album?: string
+  coverArtUrl?: string
+  durationSeconds?: number
+}
+
+export interface SpotifyConnectDeviceInfo {
+  id: string
+  name: string
+  type?: string
+  isActive?: boolean
+  isRestricted?: boolean
+  volumePercent?: number
+  isPrivateSession?: boolean
+  supportsVolume?: boolean
+}
+
+export interface SpotifyConnectSetActiveDeviceRequest {
+  deviceId: string
+  transferPlayback?: boolean
+}
+
+export interface SpotifyConnectPlayUriRequest {
+  spotifyUri: string
+  startAtSeconds?: number
+  deviceId?: string
+}
+
+export interface SpotifyConnectOAuthAuthorizeRequest {
+  clientId: string
+  redirectPort?: number
+  scopes?: string[]
+}
+
+export interface SpotifyConnectOAuthRefreshRequest {
+  clientId: string
+  refreshToken: string
+}
+
+export interface SpotifyConnectOAuthTokenResult {
+  ok: boolean
+  accessToken?: string
+  refreshToken?: string
+  expiresIn?: number
+  scope?: string
+  tokenType?: string
+  obtainedAtEpochMs?: number
+  error?: SpotifyConnectErrorPayload
+}
+
+export interface SpotifyConnectListDevicesResult {
+  ok: boolean
+  devices: SpotifyConnectDeviceInfo[]
+  activeDeviceId?: string
+  error?: SpotifyConnectErrorPayload
+}
+
+export interface SpotifyConnectStatusResult {
+  ok: boolean
+  initialized: boolean
+  receiverRunning: boolean
+  sessionConnected: boolean
+  isPlaying: boolean
+  currentTimeSeconds: number
+  durationSeconds: number
+  volume: number
+  activeDeviceId?: string
+  activeTrack?: SpotifyConnectTrackInfo
+  error?: SpotifyConnectErrorPayload
+}
+
+export type SpotifyConnectEventType =
+  | 'ready'
+  | 'receiverStarted'
+  | 'receiverStopped'
+  | 'sessionConnected'
+  | 'sessionDisconnected'
+  | 'deviceListChanged'
+  | 'trackChanged'
+  | 'timeupdate'
+  | 'play'
+  | 'pause'
+  | 'ended'
+  | 'error'
+
+export interface SpotifyConnectEvent {
+  type: SpotifyConnectEventType
+  receiverRunning?: boolean
+  sessionConnected?: boolean
+  isPlaying?: boolean
+  currentTimeSeconds?: number
+  durationSeconds?: number
+  volume?: number
+  activeTrack?: SpotifyConnectTrackInfo
+  message?: string
+  error?: SpotifyConnectErrorPayload
+}
+
 export interface IAonsokuAPI {
   enterFullScreen: () => void
   exitFullScreen: () => void
@@ -230,4 +368,25 @@ export interface IAonsokuAPI {
   nativeAudioDispose: () => Promise<NativeAudioCommandResult>
   nativeAudioEventListener: (func: (event: NativeAudioEvent) => void) => void
   removeNativeAudioEventListener: () => void
+  spotifyConnectInitialize: (
+    payload?: SpotifyConnectInitializeRequest,
+  ) => Promise<SpotifyConnectInitializeResult>
+  spotifyConnectStartReceiver: () => Promise<SpotifyConnectCommandResult>
+  spotifyConnectStatus: () => Promise<SpotifyConnectStatusResult>
+  spotifyConnectListDevices: () => Promise<SpotifyConnectListDevicesResult>
+  spotifyConnectSetActiveDevice: (
+    payload: SpotifyConnectSetActiveDeviceRequest,
+  ) => Promise<SpotifyConnectCommandResult>
+  spotifyConnectPlayUri: (
+    payload: SpotifyConnectPlayUriRequest,
+  ) => Promise<SpotifyConnectCommandResult>
+  spotifyConnectOAuthAuthorize: (
+    payload: SpotifyConnectOAuthAuthorizeRequest,
+  ) => Promise<SpotifyConnectOAuthTokenResult>
+  spotifyConnectOAuthRefresh: (
+    payload: SpotifyConnectOAuthRefreshRequest,
+  ) => Promise<SpotifyConnectOAuthTokenResult>
+  spotifyConnectDispose: () => Promise<SpotifyConnectCommandResult>
+  spotifyConnectEventListener: (func: (event: SpotifyConnectEvent) => void) => void
+  removeSpotifyConnectEventListener: () => void
 }

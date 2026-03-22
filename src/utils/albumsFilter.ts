@@ -108,6 +108,15 @@ export enum SourceFilters {
 
 export type SourceFilter = `${SourceFilters}`
 
+export enum SongSourceFilters {
+  All = 'all',
+  Navidrome = 'navidrome',
+  Local = 'local',
+  Spotify = 'spotify',
+}
+
+export type SongSourceFilter = `${SongSourceFilters}`
+
 export const sourceFilterValues = [
   {
     key: SourceFilters.All,
@@ -120,5 +129,24 @@ export const sourceFilterValues = [
   {
     key: SourceFilters.Local,
     label: 'source.filter.local',
+  },
+]
+
+export const songSourceFilterValues = [
+  {
+    key: SongSourceFilters.All,
+    label: 'source.filter.all',
+  },
+  {
+    key: SongSourceFilters.Navidrome,
+    label: 'source.filter.navidrome',
+  },
+  {
+    key: SongSourceFilters.Local,
+    label: 'source.filter.local',
+  },
+  {
+    key: SongSourceFilters.Spotify,
+    label: 'source.filter.spotify',
   },
 ]

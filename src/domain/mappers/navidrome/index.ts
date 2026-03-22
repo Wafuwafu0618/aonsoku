@@ -11,6 +11,7 @@ import { MediaSource } from '@/domain/media-source'
 
 const navidromeSource = 'navidrome' as const
 const internalBackend = 'internal' as const
+const spotifyConnectBackend = 'spotify-connect' as const
 
 function resolveSongSource(song: ISong): MediaSource {
   if (song.id.startsWith('local:')) return 'local'
@@ -68,13 +69,15 @@ function getAlbumGenreNames(album: Pick<Albums, 'genre' | 'genres'>): string[] {
 export function mapNavidromeSongToTrack(song: ISong): MediaTrack {
   const source = resolveSongSource(song)
   const sourceId = resolveSongSourceId(song, source)
+  const playbackBackend =
+    source === 'spotify' ? spotifyConnectBackend : internalBackend
 
   return {
     kind: 'track',
     id: createDomainId(source, sourceId),
     source,
     sourceId,
-    playbackBackend: internalBackend,
+    playbackBackend,
     title: song.title,
     albumTitle: song.album,
     albumId: song.albumId,

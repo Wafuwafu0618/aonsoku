@@ -10,27 +10,43 @@ import {
 } from '@/app/components/ui/dropdown-menu'
 import {
   AlbumsSearchParams,
+  SongSourceFilter,
   SourceFilter,
   SourceFilters,
   sourceFilterValues,
 } from '@/utils/albumsFilter'
 import { SearchParamsHandler } from '@/utils/searchParamsHandler'
 
-export function SourceFilterComponent() {
+interface SourceFilterOption {
+  key: string
+  label: string
+}
+
+type AnySourceFilter = SourceFilter | SongSourceFilter
+
+interface SourceFilterComponentProps {
+  options?: SourceFilterOption[]
+  defaultFilter?: AnySourceFilter
+}
+
+export function SourceFilterComponent({
+  options = sourceFilterValues,
+  defaultFilter = SourceFilters.All,
+}: SourceFilterComponentProps = {}) {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const { getSearchParam } = new SearchParamsHandler(searchParams)
 
-  const currentFilter = getSearchParam<SourceFilter>(
+  const currentFilter = getSearchParam<AnySourceFilter>(
     AlbumsSearchParams.Source,
-    SourceFilters.All,
+    defaultFilter,
   )
 
-  const currentFilterLabel = sourceFilterValues.find(
+  const currentFilterLabel = options.find(
     (item) => item.key === currentFilter,
   )?.label
 
-  function handleChangeFilter(filter: SourceFilter) {
+  function handleChangeFilter(filter: AnySourceFilter) {
     setSearchParams((state) => {
       state.set(AlbumsSearchParams.Source, filter)
       return state
@@ -42,15 +58,15 @@ export function SourceFilterComponent() {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm">
           <Database className="w-4 h-4 mr-2" />
-          {t(currentFilterLabel || 'source.filter.all')}
+          {t(currentFilterLabel || options[0]?.label || 'source.filter.all')}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {sourceFilterValues.map((item, index) => (
+        {options.map((item, index) => (
           <DropdownMenuCheckboxItem
             key={index}
             checked={item.key === currentFilter}
-            onCheckedChange={() => handleChangeFilter(item.key as SourceFilter)}
+            onCheckedChange={() => handleChangeFilter(item.key as AnySourceFilter)}
             className="cursor-pointer"
           >
             {t(item.label)}
