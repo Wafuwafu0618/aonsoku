@@ -45,6 +45,10 @@ function appendUniqueById<T extends { id: string }>(current: T[], next: T[]): T[
   return merged
 }
 
+function keepPreviousWhenEmpty<T>(current: T[], next: T[]): T[] {
+  return next.length > 0 ? next : current
+}
+
 function toPlayerSong(song: AppleMusicSong): ISong {
   const adamId = song.adamId.trim()
   const songId = adamId.length > 0 ? adamId : song.id
@@ -315,7 +319,12 @@ export default function AppleMusicPage() {
         newReleasesLimit: 12,
         topChartsLimit: 10,
       })
-      setBrowse(next)
+      setBrowse((current) => ({
+        newReleases: keepPreviousWhenEmpty(current.newReleases, next.newReleases),
+        topSongs: keepPreviousWhenEmpty(current.topSongs, next.topSongs),
+        topAlbums: keepPreviousWhenEmpty(current.topAlbums, next.topAlbums),
+        topPlaylists: keepPreviousWhenEmpty(current.topPlaylists, next.topPlaylists),
+      }))
       setHasLoadedBrowse(true)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -573,7 +582,9 @@ export default function AppleMusicPage() {
         {hasLoadedBrowse && (
           <>
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold">New Releases</h3>
+              <h3 className="text-sm font-semibold">
+                New Releases ({browse.newReleases.length})
+              </h3>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {browse.newReleases.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -594,7 +605,7 @@ export default function AppleMusicPage() {
             </div>
 
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Top Songs</h3>
+              <h3 className="text-sm font-semibold">Top Songs ({browse.topSongs.length})</h3>
               <div className="space-y-2">
                 {browse.topSongs.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -615,7 +626,9 @@ export default function AppleMusicPage() {
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <h3 className="text-sm font-semibold">Top Albums</h3>
+                <h3 className="text-sm font-semibold">
+                  Top Albums ({browse.topAlbums.length})
+                </h3>
                 <div className="space-y-2">
                   {browse.topAlbums.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
@@ -636,7 +649,9 @@ export default function AppleMusicPage() {
               </div>
 
               <div className="space-y-2">
-                <h3 className="text-sm font-semibold">Top Playlists</h3>
+                <h3 className="text-sm font-semibold">
+                  Top Playlists ({browse.topPlaylists.length})
+                </h3>
                 <div className="space-y-2">
                   {browse.topPlaylists.length === 0 ? (
                     <p className="text-sm text-muted-foreground">

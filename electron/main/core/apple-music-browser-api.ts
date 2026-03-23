@@ -186,13 +186,20 @@ function createWindow(show: boolean): BrowserWindow {
 
   nextWindow.webContents.on(
     'console-message',
-    (_event, level, message, line, sourceId) => {
+    (event) => {
+      const params = event as unknown as {
+        level?: number
+        message?: string
+        line?: number
+        sourceId?: string
+      }
+      const level = typeof params.level === 'number' ? params.level : 0
       if (level < 2) return
       appendAuthTrace('window.console', {
         level,
-        line,
-        sourceId,
-        message,
+        line: typeof params.line === 'number' ? params.line : 0,
+        sourceId: typeof params.sourceId === 'string' ? params.sourceId : '',
+        message: typeof params.message === 'string' ? params.message : '',
       })
     },
   )
@@ -880,489 +887,6 @@ export async function openAppleMusicSignInWindow(): Promise<AppleMusicOpenSignIn
   return signInInFlight
 }
 
-function buildApiScript(payload: AppleMusicApiRequestPayload): string {
-  const serializedPayload = JSON.stringify(payload)
-
-  return `
-    (async () => {
-      const payload = ${serializedPayload};
-      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      const ensureMusicKitInstance = async () => {
-        for (let i = 0; i < 80; i += 1) {
-          try {
-            const globalMusicKit = window.MusicKit;
-            const instance = globalMusicKit?.getInstance?.();
-            if (instance?.api) return instance;
-          } catch {}
-          await wait(250);
-        }
-        throw new Error('MusicKit instance is not ready in music.apple.com session.');
-      };
-
-      try {
-        const instance = await ensureMusicKitInstance();
-        const api = instance.api;
-        const storefrontId = instance.storefrontId || 'us';
-        const normalizePositiveInteger = (value, fallback, max) => {
-          const normalized = Number(value);
-          if (!Number.isFinite(normalized)) return fallback;
-          const floored = Math.floor(normalized);
-          if (floored <= 0) return fallback;
-          return Math.min(floored, max);
-        };
-        const toObjectArray = (value) =>
-          Array.isArray(value)
-            ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
-            : [];
-        const readSectionRoot = (root, key) => {
-          if (!root || typeof root !== 'object') return null;
-          const direct = root[key];
-          if (direct && typeof direct === 'object') return direct;
-          const results = root.results;
-          if (!results || typeof results !== 'object') return null;
-          const nested = results[key];
-          return nested && typeof nested === 'object' ? nested : null;
-        };
-        const extractResourceArray = (root) => {
-          if (!root || typeof root !== 'object') return [];
-
-          const directData = toObjectArray(root.data);
-          if (Array.isArray(root.data)) {
-            return directData;
-          }
-
-          const queue = Object.values(root);
-          const seen = new Set();
-          while (queue.length > 0) {
-            const current = queue.shift();
-            if (!current || typeof current !== 'object') continue;
-            if (seen.has(current)) continue;
-            seen.add(current);
-
-            const currentData = toObjectArray(current.data);
-            if (Array.isArray(current.data)) {
-              return currentData;
-            }
-
-            for (const nested of Object.values(current)) {
-              if (nested && typeof nested === 'object') {
-                queue.push(nested);
-              }
-            }
-          }
-
-          return [];
-        };
-        const parseNextOffset = (root, fallbackOffset, fallbackLimit, itemCount) => {
-          if (root && typeof root === 'object') {
-            const nextValue = typeof root.next === 'string' ? root.next : null;
-            if (nextValue) {
-              try {
-                const parsed = new URL(nextValue, 'https://music.apple.com');
-                const offsetRaw = parsed.searchParams.get('offset');
-                const offset = Number(offsetRaw);
-                if (Number.isFinite(offset) && offset >= 0) {
-                  return Math.floor(offset);
-                }
-              } catch {}
-            }
-          }
-
-          if (itemCount >= fallbackLimit) {
-            return fallbackOffset + fallbackLimit;
-          }
-          return null;
-        };
-        const EMPTY_SEARCH_RESULT = {
-          songs: { data: [] },
-          albums: { data: [] },
-          playlists: { data: [] },
-        };
-        const readSearchSectionData = (root, key) => {
-          const sectionRoot = readSectionRoot(root, key);
-          if (Array.isArray(sectionRoot)) {
-            return toObjectArray(sectionRoot);
-          }
-          return extractResourceArray(sectionRoot);
-        };
-        const normalizeSearchResult = (root) => {
-          const songs = readSearchSectionData(root, 'songs');
-          const albums = readSearchSectionData(root, 'albums');
-          const playlists = readSearchSectionData(root, 'playlists');
-
-          return {
-            songs: { data: songs },
-            albums: { data: albums },
-            playlists: { data: playlists },
-          };
-        };
-        const hasAnySearchResult = (root) => {
-          const normalized = normalizeSearchResult(root);
-          return (
-            normalized.songs.data.length > 0 ||
-            normalized.albums.data.length > 0 ||
-            normalized.playlists.data.length > 0
-          );
-        };
-        const readEntityIdFromHref = (href, entity) => {
-          const normalizedHref = typeof href === 'string' ? href.trim() : '';
-          if (!normalizedHref) return '';
-
-          const entityMatched = normalizedHref.match(
-            new RegExp('/' + entity + '/[^/?#]+/([^/?#]+)'),
-          );
-          if (entityMatched && entityMatched[1]) return entityMatched[1];
-
-          const numericMatched = normalizedHref.match(/\/(\d+)(?:[/?#]|$)/);
-          if (numericMatched && numericMatched[1]) return numericMatched[1];
-
-          const pathSegments = normalizedHref
-            .split(/[?#]/)[0]
-            .split('/')
-            .filter((entry) => entry.length > 0);
-          return pathSegments[pathSegments.length - 1] ?? '';
-        };
-        const toAbsoluteMusicUrl = (href) => {
-          try {
-            return new URL(String(href || ''), 'https://music.apple.com').toString();
-          } catch {
-            return '';
-          }
-        };
-        const cleanupText = (value) =>
-          String(value || '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        const scrapeSearchFromHtml = async (query, limit) => {
-          const searchUrl =
-            'https://music.apple.com/' +
-            encodeURIComponent(storefrontId) +
-            '/search?term=' +
-            encodeURIComponent(query);
-          const response = await fetch(searchUrl, {
-            credentials: 'include',
-            cache: 'no-store',
-          });
-          if (!response.ok) {
-            throw new Error('search html fetch failed with status ' + response.status);
-          }
-
-          const html = await response.text();
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, 'text/html');
-          const uniqueIds = {
-            songs: new Set(),
-            albums: new Set(),
-            playlists: new Set(),
-          };
-          const songs = [];
-          const albums = [];
-          const playlists = [];
-
-          const collect = (selector, entity, target, mapper) => {
-            const elements = Array.from(doc.querySelectorAll(selector));
-
-            for (const element of elements) {
-              if (target.length >= limit) break;
-
-              const href = element.getAttribute('href') || '';
-              const id = readEntityIdFromHref(href, entity);
-              if (!id) continue;
-              if (uniqueIds[entity + 's']?.has(id)) continue;
-
-              const titleFromText = cleanupText(element.textContent);
-              const titleFromAria = cleanupText(element.getAttribute('aria-label'));
-              const title = titleFromText || titleFromAria || id;
-              const url = toAbsoluteMusicUrl(href);
-              const resource = mapper({
-                id,
-                title,
-                url,
-              });
-
-              uniqueIds[entity + 's']?.add(id);
-              target.push(resource);
-            }
-          };
-
-          collect('a[href*="/song/"]', 'song', songs, ({ id, title, url }) => ({
-            id,
-            type: 'songs',
-            attributes: {
-              name: title,
-              artistName: '',
-              albumName: '',
-              durationInMillis: 0,
-              genreNames: [],
-              artwork: { url: '' },
-              url,
-              playParams: { id, catalogId: id },
-            },
-          }));
-          collect('a[href*="/album/"]', 'album', albums, ({ id, title, url }) => ({
-            id,
-            type: 'albums',
-            attributes: {
-              name: title,
-              artistName: '',
-              releaseDate: '',
-              trackCount: 0,
-              artwork: { url: '' },
-              url,
-            },
-          }));
-          collect('a[href*="/playlist/"]', 'playlist', playlists, ({ id, title, url }) => ({
-            id,
-            type: 'playlists',
-            attributes: {
-              name: title,
-              curatorName: 'Apple Music',
-              trackCount: 0,
-              artwork: { url: '' },
-              url,
-            },
-          }));
-
-          return {
-            songs: { data: songs },
-            albums: { data: albums },
-            playlists: { data: playlists },
-          };
-        };
-
-        if (payload.action === 'status') {
-          let isAuthorized = false;
-          let resolvedStorefrontId = storefrontId;
-
-          if (typeof api.music === 'function') {
-            try {
-              const meStorefront = await api.music('/v1/me/storefront');
-              const storefrontResources = extractResourceArray(meStorefront);
-              const storefrontCandidate =
-                storefrontResources.length > 0 && storefrontResources[0]
-                  ? String(storefrontResources[0].id || '').trim()
-                  : '';
-              if (storefrontCandidate) {
-                resolvedStorefrontId = storefrontCandidate;
-              }
-              isAuthorized = true;
-            } catch {
-              isAuthorized = false;
-            }
-          }
-
-          return {
-            ok: true,
-            data: {
-              isAuthorized,
-              storefrontId: resolvedStorefrontId,
-              hasCachedMusicUserToken: Boolean(instance.musicUserToken),
-            },
-          };
-        }
-
-        if (payload.action === 'search') {
-          const query = String(payload.query || '').trim();
-          const limit = normalizePositiveInteger(payload.limit, 25, 50);
-          const types = Array.isArray(payload.types)
-            ? payload.types.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
-            : [];
-
-          if (!query) {
-            return {
-              ok: true,
-              data: EMPTY_SEARCH_RESULT,
-            };
-          }
-
-          const normalizedTypes = types.length > 0 ? types : ['songs', 'albums', 'playlists'];
-          const searchTypeCsv = normalizedTypes.join(',');
-
-          let primaryResult = null;
-
-          if (typeof api.search === 'function') {
-            try {
-              primaryResult = await api.search(query, {
-                types: normalizedTypes,
-                limit,
-              });
-            } catch {
-              // fallback to alternative signatures below
-            }
-
-            if (!hasAnySearchResult(primaryResult)) {
-              try {
-                primaryResult = await api.search(query, {
-                  types: searchTypeCsv,
-                  limit,
-                });
-              } catch {
-                // fallback to api.music below
-              }
-            }
-          }
-
-          if (!hasAnySearchResult(primaryResult)) {
-            try {
-              primaryResult = await api.music('/v1/catalog/' + storefrontId + '/search', {
-                term: query,
-                types: searchTypeCsv,
-                limit,
-              });
-            } catch {
-              // fallback to html scraping below
-            }
-          }
-
-          if (hasAnySearchResult(primaryResult)) {
-            return {
-              ok: true,
-              data: {
-                ...normalizeSearchResult(primaryResult),
-                _source: 'api',
-              },
-            };
-          }
-
-          try {
-            const domFallback = await scrapeSearchFromHtml(query, limit);
-            if (
-              domFallback.songs.data.length > 0 ||
-              domFallback.albums.data.length > 0 ||
-              domFallback.playlists.data.length > 0
-            ) {
-              return {
-                ok: true,
-                data: {
-                  ...domFallback,
-                  _source: 'dom-fallback',
-                },
-              };
-            }
-          } catch {
-            // fallback to empty
-          }
-
-          return {
-            ok: true,
-            data: {
-              ...EMPTY_SEARCH_RESULT,
-              _source: 'empty',
-            },
-          };
-        }
-
-        if (payload.action === 'catalog-album') {
-          const id = String(payload.id || '').trim();
-          if (!id) throw new Error('album id is required.');
-          const raw = await api.music('/v1/catalog/' + storefrontId + '/albums/' + id, {
-            include: 'tracks',
-          });
-          return { ok: true, data: raw };
-        }
-
-        if (payload.action === 'catalog-playlist') {
-          const id = String(payload.id || '').trim();
-          if (!id) throw new Error('playlist id is required.');
-          const raw = await api.music('/v1/catalog/' + storefrontId + '/playlists/' + id, {
-            include: 'tracks',
-          });
-          return { ok: true, data: raw };
-        }
-
-        if (payload.action === 'library') {
-          const limit = normalizePositiveInteger(payload.limit, 25, 100);
-          const offset = normalizePositiveInteger(payload.offset, 0, 100_000);
-          const [songsRaw, albumsRaw, playlistsRaw] = await Promise.all([
-            api.music('/v1/me/library/songs', { limit, offset }),
-            api.music('/v1/me/library/albums', { limit, offset }),
-            api.music('/v1/me/library/playlists', { limit, offset }),
-          ]);
-          const songs = extractResourceArray(songsRaw);
-          const albums = extractResourceArray(albumsRaw);
-          const playlists = extractResourceArray(playlistsRaw);
-          const songsNextOffset = parseNextOffset(songsRaw, offset, limit, songs.length);
-          const albumsNextOffset = parseNextOffset(albumsRaw, offset, limit, albums.length);
-          const playlistsNextOffset = parseNextOffset(playlistsRaw, offset, limit, playlists.length);
-          const nextOffsetCandidates = [songsNextOffset, albumsNextOffset, playlistsNextOffset]
-            .filter((value) => Number.isFinite(value));
-          const nextOffset = nextOffsetCandidates.length > 0
-            ? Math.max(...nextOffsetCandidates)
-            : null;
-          return {
-            ok: true,
-            data: {
-              limit,
-              offset,
-              nextOffset,
-              songsNextOffset,
-              albumsNextOffset,
-              playlistsNextOffset,
-              songs,
-              albums,
-              playlists,
-              songsRaw,
-              albumsRaw,
-              playlistsRaw,
-            },
-          };
-        }
-
-        if (payload.action === 'browse') {
-          const browseKind = payload.browseKind === 'top-charts'
-            ? 'top-charts'
-            : 'new-releases';
-          const limit = normalizePositiveInteger(payload.limit, 12, 50);
-
-          if (browseKind === 'new-releases') {
-            const raw = await api.music('/v1/catalog/' + storefrontId + '/new-releases', {
-              limit,
-            });
-            const albums = extractResourceArray(readSectionRoot(raw, 'albums'));
-            return {
-              ok: true,
-              data: {
-                browseKind,
-                albums,
-                raw,
-              },
-            };
-          }
-
-          const raw = await api.music('/v1/catalog/' + storefrontId + '/charts', {
-            types: 'songs,albums,playlists',
-            limit,
-          });
-          const songs = extractResourceArray(readSectionRoot(raw, 'songs'));
-          const albums = extractResourceArray(readSectionRoot(raw, 'albums'));
-          const playlists = extractResourceArray(readSectionRoot(raw, 'playlists'));
-          return {
-            ok: true,
-            data: {
-              browseKind,
-              songs,
-              albums,
-              playlists,
-              raw,
-            },
-          };
-        }
-
-        throw new Error('Unsupported Apple Music API action: ' + payload.action);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          ok: false,
-          error: {
-            code: 'api-failed',
-            message,
-          },
-        };
-      }
-    })();
-  `
-}
-
 function buildLibraryApiScript(payload: AppleMusicApiRequestPayload): string {
   const serializedPayload = JSON.stringify(payload)
 
@@ -1508,6 +1032,778 @@ function buildLibraryApiScript(payload: AppleMusicApiRequestPayload): string {
   `
 }
 
+function buildSearchApiScript(payload: AppleMusicApiRequestPayload): string {
+  const serializedPayload = JSON.stringify(payload)
+
+  return `
+    (async () => {
+      const payload = ${serializedPayload};
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const ensureMusicKitInstance = async () => {
+        for (let i = 0; i < 80; i += 1) {
+          try {
+            const globalMusicKit = window.MusicKit;
+            const instance = globalMusicKit && typeof globalMusicKit.getInstance === 'function'
+              ? globalMusicKit.getInstance()
+              : null;
+            if (instance && instance.api) return instance;
+          } catch {}
+          await wait(250);
+        }
+        throw new Error('MusicKit instance is not ready in music.apple.com session.');
+      };
+
+      const normalizePositiveInteger = (value, fallback, max) => {
+        const normalized = Number(value);
+        if (!Number.isFinite(normalized)) return fallback;
+        const floored = Math.floor(normalized);
+        if (floored <= 0) return fallback;
+        return Math.min(floored, max);
+      };
+
+      const toObjectArray = (value) =>
+        Array.isArray(value)
+          ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+          : [];
+
+      const EMPTY_SEARCH_DATA = {
+        songs: { data: [] },
+        albums: { data: [] },
+        playlists: { data: [] },
+      };
+
+      const readSectionRoot = (root, key) => {
+        if (!root || typeof root !== 'object') return null;
+        const direct = root[key];
+        if (Array.isArray(direct)) return direct;
+        if (direct && typeof direct === 'object') return direct;
+        const results = root.results;
+        if (!results || typeof results !== 'object') return null;
+        const nested = results[key];
+        if (Array.isArray(nested)) return nested;
+        return nested && typeof nested === 'object' ? nested : null;
+      };
+
+      const extractResourceArray = (root) => {
+        if (Array.isArray(root)) return toObjectArray(root);
+        if (!root || typeof root !== 'object') return [];
+
+        const directData = toObjectArray(root.data);
+        if (Array.isArray(root.data)) {
+          return directData;
+        }
+
+        const queue = Object.values(root);
+        const seen = new Set();
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current || typeof current !== 'object') continue;
+          if (seen.has(current)) continue;
+          seen.add(current);
+
+          if (Array.isArray(current)) {
+            const currentArray = toObjectArray(current);
+            if (currentArray.length > 0) {
+              return currentArray;
+            }
+            continue;
+          }
+
+          const currentData = toObjectArray(current.data);
+          if (Array.isArray(current.data)) {
+            return currentData;
+          }
+
+          for (const nested of Object.values(current)) {
+            if (nested && typeof nested === 'object') {
+              queue.push(nested);
+            }
+          }
+        }
+
+        return [];
+      };
+
+      const readSectionData = (root, key) => {
+        const sectionRoot = readSectionRoot(root, key);
+        const sectionData = extractResourceArray(sectionRoot);
+        if (sectionData.length > 0) return sectionData;
+
+        const normalizeTypeName = (value) =>
+          typeof value === 'string' ? value.trim().toLowerCase() : '';
+        const singularKey = key.endsWith('s') ? key.slice(0, -1) : key;
+        const matchTypeKey = (typeName) => {
+          const normalizedType = normalizeTypeName(typeName);
+          if (!normalizedType) return false;
+          if (normalizedType === key || normalizedType === singularKey) return true;
+          if (normalizedType.endsWith('-' + key) || normalizedType.endsWith('-' + singularKey)) {
+            return true;
+          }
+          if (normalizedType.endsWith('/' + key) || normalizedType.endsWith('/' + singularKey)) {
+            return true;
+          }
+          return normalizedType.includes(singularKey);
+        };
+        const classifyByUrl = (urlValue) => {
+          const normalizedUrl = normalizeTypeName(urlValue);
+          if (!normalizedUrl) return '';
+          if (normalizedUrl.includes('/playlist/')) return 'playlists';
+          if (normalizedUrl.includes('/album/')) return 'albums';
+          if (normalizedUrl.includes('/song/')) return 'songs';
+          return '';
+        };
+
+        const allData = extractResourceArray(root);
+        return allData.filter((entry) => {
+          const type = typeof entry.type === 'string' ? entry.type : '';
+          if (matchTypeKey(type)) return true;
+
+          const attributes =
+            entry.attributes && typeof entry.attributes === 'object'
+              ? entry.attributes
+              : null;
+          const playParams =
+            attributes &&
+            attributes.playParams &&
+            typeof attributes.playParams === 'object'
+              ? attributes.playParams
+              : null;
+          const inferredType =
+            classifyByUrl(attributes ? attributes.url : '') ||
+            (playParams && matchTypeKey(playParams.kind) ? key : '');
+          return inferredType === key;
+        });
+      };
+
+      const normalizeSearchResult = (root) => ({
+        songs: { data: readSectionData(root, 'songs') },
+        albums: { data: readSectionData(root, 'albums') },
+        playlists: { data: readSectionData(root, 'playlists') },
+      });
+
+      const hasAnyNormalizedResult = (normalized) =>
+        Boolean(
+          normalized &&
+            normalized.songs &&
+            normalized.albums &&
+            normalized.playlists &&
+            Array.isArray(normalized.songs.data) &&
+            Array.isArray(normalized.albums.data) &&
+            Array.isArray(normalized.playlists.data) &&
+            (normalized.songs.data.length > 0 ||
+              normalized.albums.data.length > 0 ||
+              normalized.playlists.data.length > 0),
+        );
+
+      const hasAnySearchResult = (root) => {
+        const normalized = normalizeSearchResult(root);
+        return hasAnyNormalizedResult(normalized);
+      };
+
+      try {
+        const instance = await ensureMusicKitInstance();
+        const api = instance.api;
+        const storefrontId = instance.storefrontId || 'us';
+        const query = String(payload.query || '').trim();
+        const limit = normalizePositiveInteger(payload.limit, 25, 50);
+        const types = Array.isArray(payload.types)
+          ? payload.types.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+          : [];
+
+        if (!query) {
+          return {
+            ok: true,
+            data: {
+              songs: EMPTY_SEARCH_DATA.songs,
+              albums: EMPTY_SEARCH_DATA.albums,
+              playlists: EMPTY_SEARCH_DATA.playlists,
+              _source: 'empty',
+            },
+          };
+        }
+
+        const normalizedTypes = types.length > 0 ? types : ['songs', 'albums', 'playlists'];
+        const searchTypeCsv = normalizedTypes.join(',');
+        let raw = null;
+        let rawSource = 'none';
+        const sourceParts = [];
+
+        if (typeof api.search === 'function') {
+          try {
+            raw = await api.search(query, { types: normalizedTypes, limit });
+            rawSource = 'api.search.types-array';
+          } catch {}
+          if (!hasAnySearchResult(raw)) {
+            try {
+              raw = await api.search(query, { types: searchTypeCsv, limit });
+              rawSource = 'api.search.types-csv';
+            } catch {}
+          }
+          if (!hasAnySearchResult(raw)) {
+            try {
+              raw = await api.search(query, { limit });
+              rawSource = 'api.search.limit-only';
+            } catch {}
+          }
+        }
+
+        if (!hasAnySearchResult(raw)) {
+          try {
+            raw = await api.music('/v1/catalog/' + storefrontId + '/search', {
+              term: query,
+              types: normalizedTypes,
+              limit,
+            });
+            rawSource = 'api.music.types-array';
+          } catch {}
+        }
+
+        if (!hasAnySearchResult(raw)) {
+          try {
+            raw = await api.music('/v1/catalog/' + storefrontId + '/search', {
+              term: query,
+              types: searchTypeCsv,
+              limit,
+            });
+            rawSource = 'api.music.types-csv';
+          } catch {}
+        }
+
+        const dedupeResources = (items) => {
+          const next = [];
+          const seen = new Set();
+          const list = Array.isArray(items) ? items : [];
+          for (const item of list) {
+            if (!item || typeof item !== 'object') continue;
+            const id = typeof item.id === 'string' ? item.id : '';
+            const type = typeof item.type === 'string' ? item.type : '';
+            const attributes =
+              item.attributes && typeof item.attributes === 'object'
+                ? item.attributes
+                : null;
+            const name = attributes && typeof attributes.name === 'string' ? attributes.name : '';
+            const key = type + ':' + id + ':' + name;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            next.push(item);
+          }
+          return next;
+        };
+        const fetchSingleType = async (typeKey) => {
+          let candidate = null;
+          let source = '';
+          if (typeof api.search === 'function') {
+            try {
+              candidate = await api.search(query, { types: [typeKey], limit });
+              source = 'api.search.single-array';
+            } catch {}
+            let section = readSectionData(candidate, typeKey);
+            if (section.length > 0) return { data: section, source };
+
+            try {
+              candidate = await api.search(query, { types: typeKey, limit });
+              source = 'api.search.single-csv';
+            } catch {}
+            section = readSectionData(candidate, typeKey);
+            if (section.length > 0) return { data: section, source };
+          }
+
+          try {
+            candidate = await api.music('/v1/catalog/' + storefrontId + '/search', {
+              term: query,
+              types: [typeKey],
+              limit,
+            });
+            source = 'api.music.single-array';
+          } catch {}
+          let section = readSectionData(candidate, typeKey);
+          if (section.length > 0) return { data: section, source };
+
+          try {
+            candidate = await api.music('/v1/catalog/' + storefrontId + '/search', {
+              term: query,
+              types: typeKey,
+              limit,
+            });
+            source = 'api.music.single-csv';
+          } catch {}
+          section = readSectionData(candidate, typeKey);
+          if (section.length > 0) return { data: section, source };
+
+          return { data: [], source: '' };
+        };
+
+        if (rawSource !== 'none') {
+          sourceParts.push(rawSource);
+        }
+        const normalized = normalizeSearchResult(raw);
+        const requestedTypeSet = new Set(normalizedTypes);
+        const sectionKeys = ['songs', 'albums', 'playlists'];
+        for (const sectionKey of sectionKeys) {
+          if (!requestedTypeSet.has(sectionKey)) continue;
+          const currentSection = normalized[sectionKey];
+          if (!currentSection || !Array.isArray(currentSection.data)) continue;
+          if (currentSection.data.length > 0) continue;
+
+          const singleTypeResult = await fetchSingleType(sectionKey);
+          if (singleTypeResult.data.length === 0) continue;
+
+          normalized[sectionKey] = {
+            data: dedupeResources(singleTypeResult.data),
+          };
+          if (singleTypeResult.source) {
+            sourceParts.push(sectionKey + ':' + singleTypeResult.source);
+          }
+        }
+
+        if (hasAnyNormalizedResult(normalized)) {
+          return {
+            ok: true,
+            data: {
+              songs: normalized.songs,
+              albums: normalized.albums,
+              playlists: normalized.playlists,
+              _source: sourceParts.join('+') || 'api',
+            },
+          };
+        }
+
+        return {
+          ok: true,
+          data: {
+            songs: EMPTY_SEARCH_DATA.songs,
+            albums: EMPTY_SEARCH_DATA.albums,
+            playlists: EMPTY_SEARCH_DATA.playlists,
+            _source: 'empty',
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          error: {
+            code: 'api-failed',
+            message,
+          },
+        };
+      }
+    })();
+  `
+}
+
+function buildCatalogAlbumApiScript(payload: AppleMusicApiRequestPayload): string {
+  const serializedPayload = JSON.stringify(payload)
+
+  return `
+    (async () => {
+      const payload = ${serializedPayload};
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const ensureMusicKitInstance = async () => {
+        for (let i = 0; i < 80; i += 1) {
+          try {
+            const globalMusicKit = window.MusicKit;
+            const instance = globalMusicKit && typeof globalMusicKit.getInstance === 'function'
+              ? globalMusicKit.getInstance()
+              : null;
+            if (instance && instance.api) return instance;
+          } catch {}
+          await wait(250);
+        }
+        throw new Error('MusicKit instance is not ready in music.apple.com session.');
+      };
+
+      try {
+        const instance = await ensureMusicKitInstance();
+        const api = instance.api;
+        const storefrontId = instance.storefrontId || 'us';
+        const id = String(payload.id || '').trim();
+        if (!id) throw new Error('album id is required.');
+
+        const raw = await api.music('/v1/catalog/' + storefrontId + '/albums/' + id, {
+          include: 'tracks',
+        });
+        return { ok: true, data: raw };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          error: {
+            code: 'api-failed',
+            message,
+          },
+        };
+      }
+    })();
+  `
+}
+
+function buildCatalogPlaylistApiScript(payload: AppleMusicApiRequestPayload): string {
+  const serializedPayload = JSON.stringify(payload)
+
+  return `
+    (async () => {
+      const payload = ${serializedPayload};
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const ensureMusicKitInstance = async () => {
+        for (let i = 0; i < 80; i += 1) {
+          try {
+            const globalMusicKit = window.MusicKit;
+            const instance = globalMusicKit && typeof globalMusicKit.getInstance === 'function'
+              ? globalMusicKit.getInstance()
+              : null;
+            if (instance && instance.api) return instance;
+          } catch {}
+          await wait(250);
+        }
+        throw new Error('MusicKit instance is not ready in music.apple.com session.');
+      };
+
+      try {
+        const instance = await ensureMusicKitInstance();
+        const api = instance.api;
+        const storefrontId = instance.storefrontId || 'us';
+        const id = String(payload.id || '').trim();
+        if (!id) throw new Error('playlist id is required.');
+
+        const raw = await api.music('/v1/catalog/' + storefrontId + '/playlists/' + id, {
+          include: 'tracks',
+        });
+        return { ok: true, data: raw };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          error: {
+            code: 'api-failed',
+            message,
+          },
+        };
+      }
+    })();
+  `
+}
+
+function buildBrowseApiScript(payload: AppleMusicApiRequestPayload): string {
+  const serializedPayload = JSON.stringify(payload)
+
+  return `
+    (async () => {
+      const payload = ${serializedPayload};
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const ensureMusicKitInstance = async () => {
+        for (let i = 0; i < 80; i += 1) {
+          try {
+            const globalMusicKit = window.MusicKit;
+            const instance = globalMusicKit && typeof globalMusicKit.getInstance === 'function'
+              ? globalMusicKit.getInstance()
+              : null;
+            if (instance && instance.api) return instance;
+          } catch {}
+          await wait(250);
+        }
+        throw new Error('MusicKit instance is not ready in music.apple.com session.');
+      };
+
+      const normalizePositiveInteger = (value, fallback, max) => {
+        const normalized = Number(value);
+        if (!Number.isFinite(normalized)) return fallback;
+        const floored = Math.floor(normalized);
+        if (floored <= 0) return fallback;
+        return Math.min(floored, max);
+      };
+
+      const toObjectArray = (value) =>
+        Array.isArray(value)
+          ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+          : [];
+
+      const readSectionRoot = (root, key) => {
+        if (!root || typeof root !== 'object') return null;
+        const direct = root[key];
+        if (Array.isArray(direct)) return direct;
+        if (direct && typeof direct === 'object') return direct;
+        const results = root.results;
+        if (!results || typeof results !== 'object') return null;
+        const nested = results[key];
+        if (Array.isArray(nested)) return nested;
+        return nested && typeof nested === 'object' ? nested : null;
+      };
+
+      const normalizeTypeName = (value) =>
+        typeof value === 'string' ? value.trim().toLowerCase() : '';
+      const singularize = (value) =>
+        value.endsWith('s') ? value.slice(0, -1) : value;
+      const dedupeResources = (items) => {
+        const list = Array.isArray(items) ? items : [];
+        const next = [];
+        const seen = new Set();
+        for (const item of list) {
+          if (!item || typeof item !== 'object') continue;
+          const id = typeof item.id === 'string' ? item.id : '';
+          const type = typeof item.type === 'string' ? item.type : '';
+          if (!id) continue;
+          const key = type + ':' + id;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.push(item);
+        }
+        return next;
+      };
+
+      const extractResourceArray = (root) => {
+        if (Array.isArray(root)) {
+          return toObjectArray(root);
+        }
+        if (!root || typeof root !== 'object') return [];
+
+        const directData = toObjectArray(root.data);
+        if (Array.isArray(root.data)) {
+          return directData;
+        }
+
+        const queue = Object.values(root);
+        const seen = new Set();
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current || typeof current !== 'object') continue;
+          if (seen.has(current)) continue;
+          seen.add(current);
+
+          const currentData = toObjectArray(current.data);
+          if (Array.isArray(current.data)) {
+            return currentData;
+          }
+
+          for (const nested of Object.values(current)) {
+            if (nested && typeof nested === 'object') {
+              queue.push(nested);
+            }
+          }
+        }
+
+        return [];
+      };
+      const isResourceRecord = (value) =>
+        Boolean(
+          value &&
+            typeof value === 'object' &&
+            typeof value.id === 'string' &&
+            value.attributes &&
+            typeof value.attributes === 'object',
+        );
+      const extractAllResources = (root) => {
+        if (!root || typeof root !== 'object') return [];
+
+        const queue = [root];
+        const seen = new Set();
+        const out = [];
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current || typeof current !== 'object') continue;
+          if (seen.has(current)) continue;
+          seen.add(current);
+
+          if (Array.isArray(current)) {
+            for (const entry of current) {
+              if (isResourceRecord(entry)) {
+                out.push(entry);
+              }
+              if (entry && typeof entry === 'object') {
+                queue.push(entry);
+              }
+            }
+            continue;
+          }
+
+          if (isResourceRecord(current)) {
+            out.push(current);
+          }
+
+          if (Array.isArray(current.data)) {
+            for (const item of current.data) {
+              if (isResourceRecord(item)) {
+                out.push(item);
+              }
+              if (item && typeof item === 'object') {
+                queue.push(item);
+              }
+            }
+          }
+
+          for (const nested of Object.values(current)) {
+            if (nested && typeof nested === 'object') {
+              queue.push(nested);
+            }
+          }
+        }
+
+        return dedupeResources(out);
+      };
+      const matchesBrowseKey = (value, key) => {
+        const normalized = normalizeTypeName(value);
+        if (!normalized) return false;
+        const singularKey = singularize(key);
+        if (normalized === key || normalized === singularKey) return true;
+        if (
+          normalized.endsWith('-' + key) ||
+          normalized.endsWith('-' + singularKey) ||
+          normalized.endsWith('/' + key) ||
+          normalized.endsWith('/' + singularKey)
+        ) {
+          return true;
+        }
+        return normalized.includes(singularKey);
+      };
+      const inferBrowseKey = (resource) => {
+        if (!resource || typeof resource !== 'object') return '';
+        if (matchesBrowseKey(resource.type, 'songs')) return 'songs';
+        if (matchesBrowseKey(resource.type, 'albums')) return 'albums';
+        if (matchesBrowseKey(resource.type, 'playlists')) return 'playlists';
+
+        const attributes =
+          resource.attributes && typeof resource.attributes === 'object'
+            ? resource.attributes
+            : null;
+        const url = normalizeTypeName(attributes && attributes.url);
+        if (url.includes('/song/')) return 'songs';
+        if (url.includes('/album/')) return 'albums';
+        if (url.includes('/playlist/')) return 'playlists';
+
+        const playParams =
+          attributes &&
+          attributes.playParams &&
+          typeof attributes.playParams === 'object'
+            ? attributes.playParams
+            : null;
+        const kind = playParams ? playParams.kind : '';
+        if (matchesBrowseKey(kind, 'songs')) return 'songs';
+        if (matchesBrowseKey(kind, 'albums')) return 'albums';
+        if (matchesBrowseKey(kind, 'playlists')) return 'playlists';
+        return '';
+      };
+      const readResourcesByKey = (root, key) => {
+        const sectionRoot = readSectionRoot(root, key);
+        const sectionData = dedupeResources(extractResourceArray(sectionRoot));
+        if (sectionData.length > 0) return sectionData;
+
+        const allData = extractAllResources(root);
+        const filtered = allData.filter((resource) => inferBrowseKey(resource) === key);
+        return dedupeResources(filtered);
+      };
+
+      try {
+        const instance = await ensureMusicKitInstance();
+        const api = instance.api;
+        const storefrontId = instance.storefrontId || 'us';
+        const browseKind = payload.browseKind === 'top-charts'
+          ? 'top-charts'
+          : 'new-releases';
+        const limit = normalizePositiveInteger(payload.limit, 12, 50);
+
+        if (browseKind === 'new-releases') {
+          const raw = await api.music('/v1/catalog/' + storefrontId + '/new-releases', {
+            limit,
+          });
+          let albums = readResourcesByKey(raw, 'albums');
+          let fallbackSource = '';
+          if (albums.length === 0) {
+            try {
+              const fallbackRaw = await api.music('/v1/catalog/' + storefrontId + '/charts', {
+                types: 'albums',
+                limit,
+              });
+              albums = readResourcesByKey(fallbackRaw, 'albums');
+              if (albums.length > 0) {
+                fallbackSource = 'charts:albums';
+              }
+            } catch {}
+          }
+          return {
+            ok: true,
+            data: {
+              browseKind,
+              albums,
+              raw,
+              fallbackSource,
+            },
+          };
+        }
+
+        const fetchChartSectionFallback = async (key) => {
+          const typeCandidates = [key, [key]];
+          for (const types of typeCandidates) {
+            try {
+              const singleRaw = await api.music('/v1/catalog/' + storefrontId + '/charts', {
+                types,
+                limit,
+              });
+              const section = readResourcesByKey(singleRaw, key);
+              if (section.length > 0) {
+                return {
+                  section,
+                  source: Array.isArray(types) ? 'single-array' : 'single-csv',
+                };
+              }
+            } catch {}
+          }
+          return { section: [], source: '' };
+        };
+
+        const raw = await api.music('/v1/catalog/' + storefrontId + '/charts', {
+          types: 'songs,albums,playlists',
+          limit,
+        });
+        let songs = readResourcesByKey(raw, 'songs');
+        let albums = readResourcesByKey(raw, 'albums');
+        let playlists = readResourcesByKey(raw, 'playlists');
+        const fallbackSources = [];
+
+        if (songs.length === 0) {
+          const fallback = await fetchChartSectionFallback('songs');
+          if (fallback.section.length > 0) {
+            songs = fallback.section;
+            fallbackSources.push('songs:' + fallback.source);
+          }
+        }
+        if (albums.length === 0) {
+          const fallback = await fetchChartSectionFallback('albums');
+          if (fallback.section.length > 0) {
+            albums = fallback.section;
+            fallbackSources.push('albums:' + fallback.source);
+          }
+        }
+        if (playlists.length === 0) {
+          const fallback = await fetchChartSectionFallback('playlists');
+          if (fallback.section.length > 0) {
+            playlists = fallback.section;
+            fallbackSources.push('playlists:' + fallback.source);
+          }
+        }
+        return {
+          ok: true,
+          data: {
+            browseKind,
+            songs,
+            albums,
+            playlists,
+            raw,
+            fallbackSources,
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false,
+          error: {
+            code: 'api-failed',
+            message,
+          },
+        };
+      }
+    })();
+  `
+}
+
 async function waitForWindowReadyToRunScript(
   targetWindow: BrowserWindow,
 ): Promise<void> {
@@ -1610,10 +1906,32 @@ export async function invokeAppleMusicApi(
       appendAuthTrace('api.invoke.attempt', { action: payload.action, attempt: attempt + 1 })
       const targetWindow = await ensureWorkerWindow()
       await waitForWindowReadyToRunScript(targetWindow)
-      const script =
-        payload.action === 'library'
-          ? buildLibraryApiScript(payload)
-          : buildApiScript(payload)
+      let script: string
+      switch (payload.action) {
+        case 'library':
+          script = buildLibraryApiScript(payload)
+          break
+        case 'search':
+          script = buildSearchApiScript(payload)
+          break
+        case 'catalog-album':
+          script = buildCatalogAlbumApiScript(payload)
+          break
+        case 'catalog-playlist':
+          script = buildCatalogPlaylistApiScript(payload)
+          break
+        case 'browse':
+          script = buildBrowseApiScript(payload)
+          break
+        default:
+          return {
+            ok: false,
+            error: {
+              code: 'unsupported-action',
+              message: `Unsupported Apple Music API action: ${payload.action}`,
+            },
+          }
+      }
       const result = (await withTimeout(
         targetWindow.webContents.executeJavaScript(script, true) as Promise<unknown>,
         API_INVOKE_TIMEOUT_MS,
@@ -1629,6 +1947,58 @@ export async function invokeAppleMusicApi(
             message: 'Invalid response from Apple Music browser session.',
           },
         }
+      }
+
+      if (payload.action === 'search' && result.ok && result.data && typeof result.data === 'object') {
+        const data = result.data as Record<string, unknown>
+        const songsCount =
+          data.songs &&
+          typeof data.songs === 'object' &&
+          Array.isArray((data.songs as Record<string, unknown>).data)
+            ? ((data.songs as Record<string, unknown>).data as unknown[]).length
+            : 0
+        const albumsCount =
+          data.albums &&
+          typeof data.albums === 'object' &&
+          Array.isArray((data.albums as Record<string, unknown>).data)
+            ? ((data.albums as Record<string, unknown>).data as unknown[]).length
+            : 0
+        const playlistsCount =
+          data.playlists &&
+          typeof data.playlists === 'object' &&
+          Array.isArray((data.playlists as Record<string, unknown>).data)
+            ? ((data.playlists as Record<string, unknown>).data as unknown[]).length
+            : 0
+        appendAuthTrace('api.search.source', {
+          source:
+            typeof data._source === 'string'
+              ? data._source
+              : 'unknown',
+          songs: songsCount,
+          albums: albumsCount,
+          playlists: playlistsCount,
+        })
+      }
+      if (payload.action === 'browse' && result.ok && result.data && typeof result.data === 'object') {
+        const data = result.data as Record<string, unknown>
+        const songsCount = Array.isArray(data.songs) ? data.songs.length : 0
+        const albumsCount = Array.isArray(data.albums) ? data.albums.length : 0
+        const playlistsCount = Array.isArray(data.playlists) ? data.playlists.length : 0
+        appendAuthTrace('api.browse.counts', {
+          browseKind:
+            typeof data.browseKind === 'string'
+              ? data.browseKind
+              : 'unknown',
+          songs: songsCount,
+          albums: albumsCount,
+          playlists: playlistsCount,
+          fallback:
+            Array.isArray(data.fallbackSources) && data.fallbackSources.length > 0
+              ? data.fallbackSources.join(',')
+              : typeof data.fallbackSource === 'string' && data.fallbackSource.length > 0
+                ? data.fallbackSource
+              : 'none',
+        })
       }
 
       appendAuthTrace('api.invoke.done', { action: payload.action, ok: result.ok })

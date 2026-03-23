@@ -14,6 +14,75 @@ const DEFAULT_ARTWORK_SIZE = 600
 
 type UnknownRecord = Record<string, unknown>
 
+export type AppleMusicServiceErrorCode =
+  | 'timeout'
+  | 'cancelled'
+  | 'invoke-failed'
+  | 'parse-failed'
+  | 'api-failed'
+  | 'invalid-response'
+  | 'unsupported-action'
+  | 'unauthorized'
+  | 'desktop-only'
+  | 'unknown'
+
+export class AppleMusicServiceError extends Error {
+  readonly code: AppleMusicServiceErrorCode | string
+
+  constructor(code: AppleMusicServiceErrorCode | string, message: string) {
+    super(message)
+    this.name = 'AppleMusicServiceError'
+    this.code = code
+  }
+}
+
+function inferAppleMusicErrorCodeFromMessage(message: string): AppleMusicServiceErrorCode {
+  const normalized = message.toLowerCase()
+  if (
+    normalized.includes('timed out') ||
+    normalized.includes('timeout') ||
+    normalized.includes('タイムアウト')
+  ) {
+    return 'timeout'
+  }
+  if (
+    normalized.includes('cancelled') ||
+    normalized.includes('canceled') ||
+    normalized.includes('キャンセル')
+  ) {
+    return 'cancelled'
+  }
+  if (normalized.includes('invoke-failed')) return 'invoke-failed'
+  if (normalized.includes('parse-failed')) return 'parse-failed'
+  if (normalized.includes('invalid-response')) return 'invalid-response'
+  if (normalized.includes('api-failed')) return 'api-failed'
+  if (normalized.includes('unsupported-action')) return 'unsupported-action'
+  if (normalized.includes('not authorized') || normalized.includes('未認証')) {
+    return 'unauthorized'
+  }
+  return 'unknown'
+}
+
+export function resolveAppleMusicErrorCode(error: unknown): AppleMusicServiceErrorCode | string {
+  if (error instanceof AppleMusicServiceError) {
+    return error.code
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return inferAppleMusicErrorCodeFromMessage(message)
+}
+
+function requireRecord(
+  value: unknown,
+  context: string,
+): UnknownRecord {
+  const record = asRecord(value)
+  if (record) return record
+  throw new AppleMusicServiceError(
+    'parse-failed',
+    `Apple Music ${context} のレスポンス解析に失敗しました。`,
+  )
+}
+
 export interface AppleMusicService {
   initialize(): Promise<void>
   isAuthorized(): boolean
@@ -200,7 +269,89 @@ function readBrowseSection(root: UnknownRecord, key: string): UnknownRecord[] {
   if (direct.length > 0) return direct
 
   const results = asRecord(root.results) ?? {}
-  return readSectionData(results[key])
+  const nested = readSectionData(results[key])
+  if (nested.length > 0) return nested
+
+  const normalize = (value: unknown): string =>
+    typeof value === 'string' ? value.trim().toLowerCase() : ''
+  const singular = key.endsWith('s') ? key.slice(0, -1) : key
+  const matchKey = (value: unknown): boolean => {
+    const normalized = normalize(value)
+    if (!normalized) return false
+    if (normalized === key || normalized === singular) return true
+    if (
+      normalized.endsWith(`-${key}`) ||
+      normalized.endsWith(`-${singular}`) ||
+      normalized.endsWith(`/${key}`) ||
+      normalized.endsWith(`/${singular}`)
+    ) {
+      return true
+    }
+    return normalized.includes(singular)
+  }
+  const inferByUrl = (value: unknown): string => {
+    const normalized = normalize(value)
+    if (!normalized) return ''
+    if (normalized.includes('/song/')) return 'songs'
+    if (normalized.includes('/album/')) return 'albums'
+    if (normalized.includes('/playlist/')) return 'playlists'
+    return ''
+  }
+
+  const queue: unknown[] = [root]
+  const seen = new Set<unknown>()
+  const allResources: UnknownRecord[] = []
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current || typeof current !== 'object') continue
+    if (seen.has(current)) continue
+    seen.add(current)
+
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        const entryRecord = asRecord(entry)
+        if (entryRecord && isAppleMusicResourceRecord(entryRecord)) {
+          allResources.push(entryRecord)
+        }
+        if (entry && typeof entry === 'object') {
+          queue.push(entry)
+        }
+      }
+      continue
+    }
+
+    const currentRecord = asRecord(current)
+    if (!currentRecord) continue
+    if (isAppleMusicResourceRecord(currentRecord)) {
+      allResources.push(currentRecord)
+    }
+
+    const dataEntries = asRecordArray(currentRecord.data)
+    if (dataEntries.length > 0) {
+      for (const item of dataEntries) {
+        allResources.push(item)
+        queue.push(item)
+      }
+    }
+
+    for (const nestedValue of Object.values(currentRecord)) {
+      if (nestedValue && typeof nestedValue === 'object') {
+        queue.push(nestedValue)
+      }
+    }
+  }
+
+  const filtered = allResources.filter((resource) => {
+    if (matchKey(resource.type)) return true
+
+    const attributes = asRecord(resource.attributes) ?? {}
+    if (inferByUrl(attributes.url) === key) return true
+    const playParams = asRecord(attributes.playParams) ?? {}
+    return matchKey(playParams.kind)
+  })
+
+  if (filtered.length === 0) return []
+  return dedupeByKey(filtered, (item) => asString(item.id) ?? '')
 }
 
 function normalizeSearchTypes(types: string[]): string[] {
@@ -209,6 +360,33 @@ function normalizeSearchTypes(types: string[]): string[] {
     .filter((type) => type.length > 0)
 
   return filtered.length > 0 ? filtered : DEFAULT_SEARCH_TYPES
+}
+
+function dedupeByKey<T>(items: T[], getKey: (item: T) => string): T[] {
+  if (items.length <= 1) return items
+
+  const seen = new Set<string>()
+  const next: T[] = []
+  for (const item of items) {
+    const key = getKey(item).trim()
+    if (!key) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    next.push(item)
+  }
+  return next
+}
+
+function dedupeBrowseSongs(items: AppleMusicSong[]): AppleMusicSong[] {
+  return dedupeByKey(items, (item) => item.adamId || item.id)
+}
+
+function dedupeBrowseAlbums(items: AppleMusicAlbum[]): AppleMusicAlbum[] {
+  return dedupeByKey(items, (item) => item.id)
+}
+
+function dedupeBrowsePlaylists(items: AppleMusicPlaylist[]): AppleMusicPlaylist[] {
+  return dedupeByKey(items, (item) => item.id)
 }
 
 class AppleMusicServiceImpl implements AppleMusicService {
@@ -255,16 +433,24 @@ class AppleMusicServiceImpl implements AppleMusicService {
       | undefined
 
     if (!api?.appleMusicApiRequest) {
-      throw new Error(
+      throw new AppleMusicServiceError(
+        'desktop-only',
         'Apple Music browser session API は Desktop(Electron) 環境でのみ利用できます。',
       )
     }
 
     const result = await api.appleMusicApiRequest(payload)
     if (!result?.ok) {
+      const errorCode = asString(result?.error?.code)
+      const normalizedCode = errorCode?.trim().toLowerCase()
       const message =
         result?.error?.message ?? 'Apple Music browser session API request failed.'
-      throw new Error(message)
+      throw new AppleMusicServiceError(
+        normalizedCode && normalizedCode.length > 0
+          ? normalizedCode
+          : inferAppleMusicErrorCodeFromMessage(message),
+        message,
+      )
     }
 
     return result.data
@@ -272,7 +458,7 @@ class AppleMusicServiceImpl implements AppleMusicService {
 
   async initialize(): Promise<void> {
     const raw = await this.invokeApi({ action: 'status' })
-    const status = asRecord(raw) ?? {}
+    const status = requireRecord(raw, 'status')
     const isAuthorized = Boolean(status.isAuthorized)
     const storefrontId = asString(status.storefrontId) ?? DEFAULT_STOREFRONT
 
@@ -280,7 +466,8 @@ class AppleMusicServiceImpl implements AppleMusicService {
     this.storefrontId = storefrontId
 
     if (!isAuthorized) {
-      throw new Error(
+      throw new AppleMusicServiceError(
+        'unauthorized',
         'Apple Music セッションが未認証です。Settings > Content > Apple Music でサインインしてください。',
       )
     }
@@ -311,7 +498,7 @@ class AppleMusicServiceImpl implements AppleMusicService {
       types: searchTypes,
     })
 
-    const payload = asRecord(raw) ?? {}
+    const payload = requireRecord(raw, 'search')
 
     return {
       songs: readSearchSection(payload, 'songs').map(mapSong),
@@ -323,17 +510,17 @@ class AppleMusicServiceImpl implements AppleMusicService {
   async getCatalogAlbum(id: string): Promise<AppleMusicAlbum> {
     const albumId = id.trim()
     if (albumId.length === 0) {
-      throw new Error('album id が空です。')
+      throw new AppleMusicServiceError('parse-failed', 'album id が空です。')
     }
 
     const raw = await this.invokeApi({
       action: 'catalog-album',
       id: albumId,
     })
-    const payload = asRecord(raw) ?? {}
+    const payload = requireRecord(raw, 'catalog album')
     const firstResource = readResourceArray(payload)[0]
     if (!firstResource) {
-      throw new Error('Album not found in Apple Music catalog.')
+      throw new AppleMusicServiceError('parse-failed', 'Album not found in Apple Music catalog.')
     }
 
     return mapAlbum(firstResource)
@@ -342,17 +529,20 @@ class AppleMusicServiceImpl implements AppleMusicService {
   async getCatalogPlaylist(id: string): Promise<AppleMusicPlaylist> {
     const playlistId = id.trim()
     if (playlistId.length === 0) {
-      throw new Error('playlist id が空です。')
+      throw new AppleMusicServiceError('parse-failed', 'playlist id が空です。')
     }
 
     const raw = await this.invokeApi({
       action: 'catalog-playlist',
       id: playlistId,
     })
-    const payload = asRecord(raw) ?? {}
+    const payload = requireRecord(raw, 'catalog playlist')
     const firstResource = readResourceArray(payload)[0]
     if (!firstResource) {
-      throw new Error('Playlist not found in Apple Music catalog.')
+      throw new AppleMusicServiceError(
+        'parse-failed',
+        'Playlist not found in Apple Music catalog.',
+      )
     }
 
     return mapPlaylist(firstResource)
@@ -367,7 +557,7 @@ class AppleMusicServiceImpl implements AppleMusicService {
       limit: options?.limit,
       offset: options?.offset,
     })
-    const payload = asRecord(raw) ?? {}
+    const payload = requireRecord(raw, 'library')
     const songsResources = asRecordArray(payload.songs)
     const albumsResources = asRecordArray(payload.albums)
     const playlistsResources = asRecordArray(payload.playlists)
@@ -428,8 +618,8 @@ class AppleMusicServiceImpl implements AppleMusicService {
       }),
     ])
 
-    const newReleasesPayload = asRecord(newReleasesRaw) ?? {}
-    const topChartsPayload = asRecord(topChartsRaw) ?? {}
+    const newReleasesPayload = requireRecord(newReleasesRaw, 'browse(new-releases)')
+    const topChartsPayload = requireRecord(topChartsRaw, 'browse(top-charts)')
 
     const newReleasesResources = asRecordArray(newReleasesPayload.albums)
     const newReleasesRawRoot = asRecord(newReleasesPayload.raw) ?? {}
@@ -457,10 +647,10 @@ class AppleMusicServiceImpl implements AppleMusicService {
         : readBrowseSection(topChartsRawRoot, 'playlists')
 
     return {
-      newReleases: newReleasesBase.map(mapAlbum),
-      topSongs: topSongsBase.map(mapSong),
-      topAlbums: topAlbumsBase.map(mapAlbum),
-      topPlaylists: topPlaylistsBase.map(mapPlaylist),
+      newReleases: dedupeBrowseAlbums(newReleasesBase.map(mapAlbum)),
+      topSongs: dedupeBrowseSongs(topSongsBase.map(mapSong)),
+      topAlbums: dedupeBrowseAlbums(topAlbumsBase.map(mapAlbum)),
+      topPlaylists: dedupeBrowsePlaylists(topPlaylistsBase.map(mapPlaylist)),
     }
   }
 }
