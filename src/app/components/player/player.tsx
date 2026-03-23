@@ -93,28 +93,50 @@ export function Player() {
       return encodeURI(fileUrl)
     }
 
-    if (isSpotifySong) {
-      if (currentSongSourceId.startsWith('spotify:')) {
-        return currentSongSourceId
+    const normalizedSourceId = currentSongSourceId.trim()
+
+    if (isSpotifySong || normalizedSourceId.startsWith('spotify:')) {
+      if (normalizedSourceId.startsWith('spotify:')) {
+        return normalizedSourceId
       }
 
-      return `spotify:${currentSongSourceId}`
+      return `spotify:${normalizedSourceId}`
     }
 
-    if (isAppleMusicSong) {
-      if (currentSongSourceId.startsWith('apple-music://')) {
-        return currentSongSourceId
+    const isAppleMusicContext =
+      isAppleMusicSong ||
+      currentQueueItem?.source === 'apple-music' ||
+      currentQueueItem?.playbackBackend === 'apple-music' ||
+      normalizedSourceId.startsWith('apple-music:') ||
+      normalizedSourceId.startsWith('apple-music://') ||
+      song.id?.startsWith('apple-music:')
+
+    if (isAppleMusicContext) {
+      if (normalizedSourceId.startsWith('apple-music://')) {
+        return normalizedSourceId
       }
 
-      if (currentSongSourceId.startsWith('apple-music:')) {
-        return `apple-music://${currentSongSourceId.replace(/^apple-music:/, '')}`
+      if (normalizedSourceId.startsWith('apple-music:')) {
+        return `apple-music://${normalizedSourceId.replace(/^apple-music:/, '')}`
       }
 
-      return `apple-music://${currentSongSourceId}`
+      if (song.id?.startsWith('apple-music:')) {
+        return `apple-music://${song.id.replace(/^apple-music:/, '')}`
+      }
+
+      return `apple-music://${normalizedSourceId}`
     }
 
     return getSongStreamUrl(currentSongSourceId)
-  }, [currentSongSourceId, isAppleMusicSong, isLocalSong, isSpotifySong, song])
+  }, [
+    currentQueueItem?.playbackBackend,
+    currentQueueItem?.source,
+    currentSongSourceId,
+    isAppleMusicSong,
+    isLocalSong,
+    isSpotifySong,
+    song,
+  ])
 
   const getAudioRef = useCallback(() => {
     if (isRadio) return radioRef
