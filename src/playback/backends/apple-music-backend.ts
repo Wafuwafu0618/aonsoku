@@ -67,7 +67,6 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   private initialized = false
   private listenerAttached = false
   private disposed = false
-  private pendingLoad: Promise<void> | null = null
   private currentAdamId: string | null = null
   private outputMode: NativeAudioOutputMode
 
@@ -207,19 +206,6 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   }
 
   async load(request: PlaybackLoadRequest): Promise<void> {
-    const loadTask = this.loadInternal(request)
-    this.pendingLoad = loadTask
-
-    try {
-      await loadTask
-    } finally {
-      if (this.pendingLoad === loadTask) {
-        this.pendingLoad = null
-      }
-    }
-  }
-
-  private async loadInternal(request: PlaybackLoadRequest): Promise<void> {
     const api = readApi()
     if (!api) {
       this.status = 'error'
@@ -230,7 +216,6 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
 
     this.errorMessage = undefined
     this.status = 'loading'
-    logger.info(LOG_TAG, 'load started')
 
     if (typeof request.loop === 'boolean') {
       this.loop = request.loop
@@ -262,13 +247,9 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       // Step 4: Initialize native audio sidecar and load the decrypted temp file
       await this.ensureInitialized()
 
-      // Apple Music queue actions are expected to start playback immediately.
-      // Force autoplay to avoid store/update races where request.autoplay can be false.
-      const shouldAutoplay = true
-
       const loadResult = await api.nativeAudioLoad({
         src: resolveResult.tempFilePath,
-        autoplay: shouldAutoplay,
+        autoplay: request.autoplay,
         loop: request.loop,
         startAtSeconds: request.startAtSeconds,
         playbackRate: request.playbackRate,
@@ -286,17 +267,6 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       }
 
       logger.info(LOG_TAG, `Loaded adamId ${adamId} successfully`)
-
-      if (shouldAutoplay) {
-        const playResult = await api.nativeAudioPlay()
-        if (!playResult.ok) {
-          throw {
-            code: playResult.error?.code ?? 'native-audio-play-failed',
-            message: playResult.error?.message ?? 'Failed to start Apple Music playback.',
-          }
-        }
-        logger.info(LOG_TAG, `Playback started for adamId ${adamId}`)
-      }
     } catch (error) {
       const message =
         typeof error === 'object' && error !== null && 'message' in error
@@ -317,11 +287,6 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   async play(): Promise<void> {
     const api = readApi()
     if (!api) throw { code: 'native-api-unavailable', message: 'Native audio API is not available.' }
-
-    if (this.pendingLoad) {
-      logger.info(LOG_TAG, 'play requested while load is pending; waiting for load completion')
-      await this.pendingLoad
-    }
 
     await this.ensureInitialized()
     const result = await api.nativeAudioPlay()

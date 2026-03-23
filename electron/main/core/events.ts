@@ -531,46 +531,12 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   )
 
   ipcMain.removeHandler(IpcChannels.NativeAudioLoad)
-  ipcMain.handle(IpcChannels.NativeAudioLoad, async (_, payload) => {
-    const src =
-      payload && typeof payload === 'object' && 'src' in payload
-        ? String((payload as { src?: unknown }).src ?? '')
-        : ''
-    const srcPreview = src.length > 120 ? `${src.slice(0, 120)}...` : src
-    console.log(
-      '[NativeAudioIPC] load invoke',
-      `autoplay=${Boolean((payload as { autoplay?: unknown })?.autoplay)}`,
-      `src=${srcPreview}`,
-    )
-
-    const result = await nativeAudioSidecar.load(payload)
-    if (!result.ok) {
-      console.warn(
-        '[NativeAudioIPC] load failed',
-        result.error?.code,
-        result.error?.message,
-      )
-    } else {
-      console.log('[NativeAudioIPC] load ok')
-    }
-    return result
-  })
+  ipcMain.handle(IpcChannels.NativeAudioLoad, (_, payload) =>
+    nativeAudioSidecar.load(payload),
+  )
 
   ipcMain.removeHandler(IpcChannels.NativeAudioPlay)
-  ipcMain.handle(IpcChannels.NativeAudioPlay, async () => {
-    console.log('[NativeAudioIPC] play invoke')
-    const result = await nativeAudioSidecar.play()
-    if (!result.ok) {
-      console.warn(
-        '[NativeAudioIPC] play failed',
-        result.error?.code,
-        result.error?.message,
-      )
-    } else {
-      console.log('[NativeAudioIPC] play ok')
-    }
-    return result
-  })
+  ipcMain.handle(IpcChannels.NativeAudioPlay, () => nativeAudioSidecar.play())
 
   ipcMain.removeHandler(IpcChannels.NativeAudioPause)
   ipcMain.handle(IpcChannels.NativeAudioPause, () => nativeAudioSidecar.pause())
