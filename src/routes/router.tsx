@@ -35,6 +35,7 @@ const Playlist = lazy(() => import('@/app/pages/playlists/playlist'))
 const Radios = lazy(() => import('@/app/pages/radios/radios-list'))
 const SongList = lazy(() => import('@/app/pages/songs/songlist'))
 const Home = lazy(() => import('@/app/pages/home'))
+const AppleMusic = lazy(() => import('@/app/pages/apple-music'))
 const PodcastsList = lazy(() => import('@/app/pages/podcasts/list'))
 const Podcast = lazy(() => import('@/app/pages/podcasts/podcast'))
 const Episode = lazy(() => import('@/app/pages/podcasts/episode'))
@@ -106,6 +107,16 @@ export const router = createHashRouter([
         element: (
           <Suspense fallback={<SongListFallback />}>
             <PlaylistsPage />
+          </Suspense>
+        ),
+      },
+      {
+        id: 'apple-music',
+        path: ROUTES.LIBRARY.APPLE_MUSIC,
+        errorElement: <ErrorPage />,
+        element: (
+          <Suspense fallback={<SongListFallback />}>
+            <AppleMusic />
           </Suspense>
         ),
       },

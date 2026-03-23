@@ -61,6 +61,12 @@ export enum IpcChannels {
   SpotifyConnectOAuthRefresh = 'spotify-connect-oauth-refresh',
   SpotifyConnectDispose = 'spotify-connect-dispose',
   SpotifyConnectEvent = 'spotify-connect-event',
+  AppleMusicResolve = 'apple-music-resolve',
+  AppleMusicSetWrapperConfig = 'apple-music-set-wrapper-config',
+  AppleMusicGetLastRequestDebug = 'apple-music-get-last-request-debug',
+  AppleMusicGetDebugReport = 'apple-music-get-debug-report',
+  AppleMusicOpenSignInWindow = 'apple-music-open-sign-in-window',
+  AppleMusicApiRequest = 'apple-music-api-request',
 }
 
 export interface LocalLibraryDirectoryEntry {
@@ -311,6 +317,60 @@ export interface SpotifyConnectEvent {
   error?: SpotifyConnectErrorPayload
 }
 
+export interface AppleMusicResolveResult {
+  ok: boolean
+  tempFilePath?: string
+  durationSeconds?: number
+  error?: { code: string; message: string }
+}
+
+export interface AppleMusicWrapperConfig {
+  host: string
+  decryptPort: number
+  m3u8Port: number
+  accountPort: number
+}
+
+export interface AppleMusicRequestDebug {
+  requestId: number
+  url: string
+  method: string
+  statusCode?: number
+  timestampMs: number
+  headers: Record<string, string>
+}
+
+export type AppleMusicApiAction =
+  | 'status'
+  | 'search'
+  | 'catalog-album'
+  | 'catalog-playlist'
+  | 'library'
+  | 'browse'
+
+export type AppleMusicBrowseKind = 'new-releases' | 'top-charts'
+
+export interface AppleMusicApiRequestPayload {
+  action: AppleMusicApiAction
+  query?: string
+  types?: string[]
+  id?: string
+  limit?: number
+  offset?: number
+  browseKind?: AppleMusicBrowseKind
+}
+
+export interface AppleMusicApiResponse {
+  ok: boolean
+  data?: unknown
+  error?: { code: string; message: string }
+}
+
+export interface AppleMusicOpenSignInResult {
+  ok: boolean
+  error?: { code: string; message: string }
+}
+
 export interface IAonsokuAPI {
   enterFullScreen: () => void
   exitFullScreen: () => void
@@ -389,4 +449,12 @@ export interface IAonsokuAPI {
   spotifyConnectDispose: () => Promise<SpotifyConnectCommandResult>
   spotifyConnectEventListener: (func: (event: SpotifyConnectEvent) => void) => void
   removeSpotifyConnectEventListener: () => void
+  appleMusicResolve: (adamId: string) => Promise<AppleMusicResolveResult>
+  appleMusicSetWrapperConfig: (config: AppleMusicWrapperConfig) => Promise<void>
+  appleMusicGetLastRequestDebug: () => Promise<AppleMusicRequestDebug | null>
+  appleMusicGetDebugReport: () => Promise<string>
+  appleMusicOpenSignInWindow: () => Promise<AppleMusicOpenSignInResult>
+  appleMusicApiRequest: (
+    payload: AppleMusicApiRequestPayload,
+  ) => Promise<AppleMusicApiResponse>
 }

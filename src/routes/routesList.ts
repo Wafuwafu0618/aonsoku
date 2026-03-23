@@ -8,6 +8,7 @@ const LIBRARY = {
   ALBUMS: '/library/albums',
   FAVORITES: '/library/favorites',
   PLAYLISTS: '/library/playlists',
+  APPLE_MUSIC: '/library/apple-music',
   PODCASTS: '/library/podcasts',
   EPISODES: '/library/episodes',
   RADIOS: '/library/radios',

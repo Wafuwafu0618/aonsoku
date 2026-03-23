@@ -54,6 +54,11 @@ export function getSourceStyle(source: QueueItem['source']) {
       color: '#7C3AED', // violet-600
       bgColor: '#EDE9FE', // violet-50
     },
+    'apple-music': {
+      label: 'Apple Music',
+      color: '#E11D48',
+      bgColor: '#FFE4E6',
+    },
   }
 
   return styles[source] ?? styles.navidrome

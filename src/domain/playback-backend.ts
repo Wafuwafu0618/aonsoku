@@ -4,6 +4,7 @@ export const PLAYBACK_BACKEND_IDS = [
   'spotify-connect',
   'hqplayer',
   'exclusive',
+  'apple-music',
 ] as const
 
 export type PlaybackBackendId = (typeof PLAYBACK_BACKEND_IDS)[number]

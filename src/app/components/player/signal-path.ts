@@ -40,6 +40,7 @@ const sourceLabels: Record<QueueItem['source'], string> = {
   navidrome: 'Navidrome',
   spotify: 'Spotify',
   local: 'Local Library',
+  'apple-music': 'Apple Music',
 }
 
 const outputApiLabels: Record<OversamplingOutputApi, string> = {

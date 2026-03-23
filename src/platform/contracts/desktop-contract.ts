@@ -20,6 +20,14 @@ export type { IDownloadPayload } from '../../../electron/main/core/downloads'
 export type { ISettingPayload } from '../../../electron/main/core/settings'
 // Preloadからの型を再エクスポート
 export {
+  type AppleMusicApiAction,
+  type AppleMusicBrowseKind,
+  type AppleMusicApiRequestPayload,
+  type AppleMusicApiResponse,
+  type AppleMusicOpenSignInResult,
+  type AppleMusicRequestDebug,
+  type AppleMusicResolveResult,
+  type AppleMusicWrapperConfig,
   type IAonsokuAPI,
   IpcChannels,
   type NativeAudioCommandResult,

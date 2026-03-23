@@ -1,6 +1,7 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
 import {
+  AppleMusicWrapperConfig,
   IAonsokuAPI,
   IpcChannels,
   NativeAudioEvent,
@@ -149,6 +150,18 @@ const api: IAonsokuAPI = {
   removeSpotifyConnectEventListener: () => {
     ipcRenderer.removeAllListeners(IpcChannels.SpotifyConnectEvent)
   },
+  appleMusicResolve: (adamId: string) =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicResolve, adamId),
+  appleMusicSetWrapperConfig: (config: AppleMusicWrapperConfig) =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicSetWrapperConfig, config),
+  appleMusicGetLastRequestDebug: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicGetLastRequestDebug),
+  appleMusicGetDebugReport: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicGetDebugReport),
+  appleMusicOpenSignInWindow: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicOpenSignInWindow),
+  appleMusicApiRequest: (payload) =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicApiRequest, payload),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -12,10 +12,12 @@ import { MediaSource } from '@/domain/media-source'
 const navidromeSource = 'navidrome' as const
 const internalBackend = 'internal' as const
 const spotifyConnectBackend = 'spotify-connect' as const
+const appleMusicBackend = 'apple-music' as const
 
 function resolveSongSource(song: ISong): MediaSource {
   if (song.id.startsWith('local:')) return 'local'
   if (song.id.startsWith('spotify:')) return 'spotify'
+  if (song.id.startsWith('apple-music:')) return 'apple-music'
 
   return navidromeSource
 }
@@ -27,6 +29,10 @@ function resolveSongSourceId(song: ISong, source: MediaSource): string {
 
   if (source === 'spotify') {
     return song.id.replace(/^spotify:/, '') || song.id
+  }
+
+  if (source === 'apple-music') {
+    return song.id.replace(/^apple-music:/, '') || song.id
   }
 
   return song.id
@@ -70,7 +76,11 @@ export function mapNavidromeSongToTrack(song: ISong): MediaTrack {
   const source = resolveSongSource(song)
   const sourceId = resolveSongSourceId(song, source)
   const playbackBackend =
-    source === 'spotify' ? spotifyConnectBackend : internalBackend
+    source === 'spotify'
+      ? spotifyConnectBackend
+      : source === 'apple-music'
+        ? appleMusicBackend
+        : internalBackend
 
   return {
     kind: 'track',
@@ -99,6 +109,7 @@ export function mapNavidromeSongToTrack(song: ISong): MediaTrack {
     path: song.path,
     starredAt: song.starred,
     playedAt: song.played,
+    adamId: source === 'apple-music' ? sourceId : undefined,
     replayGain: song.replayGain,
   }
 }

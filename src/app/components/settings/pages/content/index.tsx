@@ -1,3 +1,4 @@
+import { AppleMusicContent } from './apple-music'
 import { ImagesContent } from './images'
 import { LocalLibraryContent } from './local-library'
 import { PodcastContent } from './podcast'
@@ -9,6 +10,7 @@ export function Content() {
     <div className="space-y-4">
       <SidebarContent />
       <LocalLibraryContent />
+      <AppleMusicContent />
       <SpotifyConnectContent />
       <PodcastContent />
       <ImagesContent />

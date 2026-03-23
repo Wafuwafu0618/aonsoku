@@ -77,6 +77,9 @@ export function Player() {
     currentQueueItem?.source === 'local' || song?.id?.startsWith('local:')
   const isSpotifySong =
     currentQueueItem?.source === 'spotify' || song?.id?.startsWith('spotify:')
+  const isAppleMusicSong =
+    currentQueueItem?.source === 'apple-music' ||
+    song?.id?.startsWith('apple-music:')
 
   const currentSongSrc = useMemo(() => {
     if (!song) return ''
@@ -98,8 +101,20 @@ export function Player() {
       return `spotify:${currentSongSourceId}`
     }
 
+    if (isAppleMusicSong) {
+      if (currentSongSourceId.startsWith('apple-music://')) {
+        return currentSongSourceId
+      }
+
+      if (currentSongSourceId.startsWith('apple-music:')) {
+        return `apple-music://${currentSongSourceId.replace(/^apple-music:/, '')}`
+      }
+
+      return `apple-music://${currentSongSourceId}`
+    }
+
     return getSongStreamUrl(currentSongSourceId)
-  }, [currentSongSourceId, isLocalSong, isSpotifySong, song])
+  }, [currentSongSourceId, isAppleMusicSong, isLocalSong, isSpotifySong, song])
 
   const getAudioRef = useCallback(() => {
     if (isRadio) return radioRef

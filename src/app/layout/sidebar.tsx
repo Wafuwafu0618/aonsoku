@@ -1,6 +1,7 @@
 import {
   HeartIcon,
   HomeIcon,
+  HeadphonesIcon,
   LibraryIcon,
   ListMusicIcon,
   Mic2Icon,
@@ -17,6 +18,7 @@ const Music2 = memo(Music2Icon)
 const Radio = memo(RadioIcon)
 const Home = memo(HomeIcon)
 const Library = memo(LibraryIcon)
+const Headphones = memo(HeadphonesIcon)
 const Podcast = memo(PodcastIcon)
 const Heart = memo(HeartIcon)
 
@@ -34,6 +36,7 @@ export enum SidebarItems {
   Albums = 'albums',
   Favorites = 'favorites',
   Playlists = 'playlists',
+  AppleMusic = 'apple-music',
   Podcasts = 'podcasts',
   Radios = 'radios',
   PodcastAll = 'podcast-all',
@@ -79,6 +82,12 @@ export const libraryItems = [
     title: 'sidebar.playlists',
     route: ROUTES.LIBRARY.PLAYLISTS,
     icon: ListMusic,
+  },
+  {
+    id: SidebarItems.AppleMusic,
+    title: 'Apple Music',
+    route: ROUTES.LIBRARY.APPLE_MUSIC,
+    icon: Headphones,
   },
   {
     id: SidebarItems.Podcasts,

@@ -36,5 +36,7 @@ export interface MediaTrack {
   path?: string
   starredAt?: string
   playedAt?: string
+  adamId?: string
+  appleMusicUrl?: string
   replayGain?: ReplayGainProfile
 }

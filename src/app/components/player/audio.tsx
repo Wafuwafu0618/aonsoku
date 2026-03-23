@@ -209,6 +209,10 @@ export function AudioPlayer({
     isSong &&
     typeof src === 'string' &&
     src.toLowerCase().startsWith('spotify:')
+  const isAppleMusicSongSource =
+    isSong &&
+    typeof src === 'string' &&
+    src.toLowerCase().startsWith('apple-music://')
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
@@ -244,8 +248,16 @@ export function AudioPlayer({
     (isSpotifySongSource ||
       currentQueueItem?.source === 'spotify' ||
       currentQueueItem?.playbackBackend === 'spotify-connect')
+  const useAppleMusicSongBackend =
+    isSong &&
+    (isAppleMusicSongSource ||
+      currentQueueItem?.source === 'apple-music' ||
+      currentQueueItem?.playbackBackend === 'apple-music')
   const useWebAudioSongPath =
-    isSong && !useNativeSongBackend && !useSpotifyConnectSongBackend
+    isSong &&
+    !useNativeSongBackend &&
+    !useSpotifyConnectSongBackend &&
+    !useAppleMusicSongBackend
   const shouldAttachWebAudioGraph =
     useWebAudioSongPath && (replayGainEnabled || oversamplingEnabled)
 
@@ -464,6 +476,22 @@ export function AudioPlayer({
         return
       }
 
+      if (useAppleMusicSongBackend) {
+        const appleMusicReason =
+          reason instanceof Error
+            ? reason.message
+            : typeof reason === 'string'
+              ? reason
+              : undefined
+        toast.error(
+          appleMusicReason
+            ? `${t('warnings.songError')} (${appleMusicReason})`
+            : t('warnings.songError'),
+        )
+        setPlayingState(false)
+        return
+      }
+
       const audio = audioRef.current
       if (!audio) return
 
@@ -491,6 +519,7 @@ export function AudioPlayer({
       setReplayGainError,
       t,
       useNativeSongBackend,
+      useAppleMusicSongBackend,
       useSpotifyConnectSongBackend,
     ],
   )
@@ -502,11 +531,13 @@ export function AudioPlayer({
 
     let cancelled = false
 
-    const nextBackendId = useSpotifyConnectSongBackend
-      ? 'spotify-connect'
-      : useNativeSongBackend
-        ? 'native'
-        : 'internal'
+    const nextBackendId = useAppleMusicSongBackend
+      ? 'apple-music'
+      : useSpotifyConnectSongBackend
+        ? 'spotify-connect'
+        : useNativeSongBackend
+          ? 'native'
+          : 'internal'
     const currentBackend = songBackendRef.current
 
     if (!currentBackend || currentBackend.id !== nextBackendId) {
@@ -648,6 +679,7 @@ export function AudioPlayer({
     setOutputApi,
     src,
     t,
+    useAppleMusicSongBackend,
     useNativeSongBackend,
     useSpotifyConnectSongBackend,
   ])

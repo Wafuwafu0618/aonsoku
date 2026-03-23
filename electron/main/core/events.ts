@@ -1,8 +1,18 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { is, platform } from '@electron-toolkit/utils'
-import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  session as electronSession,
+  shell,
+  type Session,
+} from 'electron'
+import {
+  AppleMusicRequestDebug,
+  AppleMusicWrapperConfig,
   IpcChannels,
   LocalLibraryFileEntry,
   OverlayColors,
@@ -31,11 +41,175 @@ import { playerState } from './playerState'
 import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
 import { setTaskbarButtons } from './taskbar'
 import { DEFAULT_TITLE_BAR_HEIGHT } from './titleBarOverlay'
+import { resolveAppleMusicTrack } from './apple-music-pipeline'
+import {
+  getAppleMusicDebugReport,
+  invokeAppleMusicApi,
+  openAppleMusicSignInWindow,
+} from './apple-music-browser-api'
+import { setWrapperConfig } from './wrapper-client'
 
 const MUSIC_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.alac'])
+const APPLE_MUSIC_REQUEST_FILTER = {
+  urls: ['https://*.music.apple.com/*'],
+}
+const APPLE_MUSIC_AUTH_PARTITION = 'persist:apple-music-auth'
+const appleMusicRequestDebugById = new Map<number, AppleMusicRequestDebug>()
+const appleMusicDebugSessions = new WeakSet<Session>()
+let lastAppleMusicRequestDebug: AppleMusicRequestDebug | null = null
 
 function isMusicFile(path: string): boolean {
   return MUSIC_EXTENSIONS.has(extname(path).toLowerCase())
+}
+
+function normalizeHeaderValue(value: string | string[] | undefined): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    return normalized.length > 0 ? normalized : null
+  }
+
+  if (!Array.isArray(value)) return null
+  const firstValid = value
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0)
+
+  return firstValid ?? null
+}
+
+function readHeaderValue(
+  headers: Record<string, string | string[] | undefined>,
+  key: string,
+): string | null {
+  const normalizedTarget = key.toLowerCase()
+
+  for (const [headerKey, headerValue] of Object.entries(headers)) {
+    if (headerKey.toLowerCase() !== normalizedTarget) continue
+    return normalizeHeaderValue(headerValue)
+  }
+
+  return null
+}
+
+function maskToken(value: string): string {
+  if (value.length <= 10) return `[len:${value.length}]`
+  return `${value.slice(0, 6)}...${value.slice(-4)} [len:${value.length}]`
+}
+
+function sanitizeHeaderValue(key: string, value: string): string {
+  const normalizedKey = key.toLowerCase()
+
+  if (normalizedKey === 'authorization') {
+    const matched = value.match(/^Bearer\s+(.+)$/i)
+    if (!matched) return '[redacted]'
+    return `Bearer ${maskToken(matched[1]?.trim() ?? '')}`
+  }
+  if (normalizedKey === 'media-user-token' || normalizedKey === 'music-user-token') {
+    return maskToken(value)
+  }
+  if (normalizedKey === 'cookie' || normalizedKey === 'set-cookie') {
+    return '[redacted]'
+  }
+  if (value.length > 180) {
+    return `${value.slice(0, 180)}...`
+  }
+
+  return value
+}
+
+function toSanitizedHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  for (const [key, rawValue] of Object.entries(headers)) {
+    const normalizedValue = normalizeHeaderValue(rawValue)
+    if (!normalizedValue) continue
+
+    const normalizedKey = key.toLowerCase()
+    result[normalizedKey] = sanitizeHeaderValue(normalizedKey, normalizedValue)
+  }
+
+  return result
+}
+
+function isAppleMusicApiRequestUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'api.music.apple.com' || host === 'amp-api.music.apple.com') {
+      return true
+    }
+    if (host.startsWith('amp-api-') && host.endsWith('.music.apple.com')) {
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+function setupAppleMusicRequestDebug(targetSession: Session): void {
+  if (appleMusicDebugSessions.has(targetSession)) {
+    return
+  }
+  appleMusicDebugSessions.add(targetSession)
+
+  targetSession.webRequest.onBeforeSendHeaders(
+    APPLE_MUSIC_REQUEST_FILTER,
+    (details, callback) => {
+      const requestHeaders = {
+        ...(details.requestHeaders ?? {}),
+      }
+      const isAppleMusicApiRequest = isAppleMusicApiRequestUrl(details.url)
+      if (isAppleMusicApiRequest) {
+        const musicUserToken = readHeaderValue(requestHeaders, 'music-user-token')
+        const mediaUserToken = readHeaderValue(requestHeaders, 'media-user-token')
+        if (!musicUserToken && mediaUserToken) {
+          requestHeaders['Music-User-Token'] = mediaUserToken
+        }
+
+        appleMusicRequestDebugById.set(details.id, {
+          requestId: details.id,
+          url: details.url,
+          method: details.method,
+          timestampMs: Date.now(),
+          headers: toSanitizedHeaders(requestHeaders),
+        })
+
+        if (appleMusicRequestDebugById.size > 200) {
+          appleMusicRequestDebugById.clear()
+        }
+      }
+
+      callback({
+        requestHeaders,
+      })
+    },
+  )
+
+  targetSession.webRequest.onCompleted(APPLE_MUSIC_REQUEST_FILTER, (details) => {
+    const pending = appleMusicRequestDebugById.get(details.id)
+    if (!pending) return
+
+    const completed: AppleMusicRequestDebug = {
+      ...pending,
+      statusCode: details.statusCode,
+    }
+
+    lastAppleMusicRequestDebug = completed
+    appleMusicRequestDebugById.delete(details.id)
+  })
+
+  targetSession.webRequest.onErrorOccurred(APPLE_MUSIC_REQUEST_FILTER, (details) => {
+    const pending = appleMusicRequestDebugById.get(details.id)
+    if (!pending) return
+
+    lastAppleMusicRequestDebug = {
+      ...pending,
+      statusCode: -1,
+    }
+    appleMusicRequestDebugById.delete(details.id)
+  })
 }
 
 function getFileEntryKey(path: string): string {
@@ -145,10 +319,34 @@ export function setupEvents(window: BrowserWindow | null) {
   })
 }
 
+function formatLastAppleMusicRequestDebug(
+  debug: AppleMusicRequestDebug | null,
+): string {
+  if (!debug) return 'lastRequestDebug: (none)'
+
+  const headerLines = Object.entries(debug.headers)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n')
+
+  return [
+    '--- last-request-debug ---',
+    `time=${new Date(debug.timestampMs).toISOString()}`,
+    `requestId=${debug.requestId}`,
+    `status=${debug.statusCode ?? 'unknown'}`,
+    `method=${debug.method}`,
+    `url=${debug.url}`,
+    headerLines.length > 0 ? headerLines : '(no headers)',
+  ].join('\n')
+}
+
 export function setupIpcEvents(window: BrowserWindow | null) {
   if (!window) return
 
   ipcMain.removeAllListeners()
+  setupAppleMusicRequestDebug(window.webContents.session)
+  setupAppleMusicRequestDebug(
+    electronSession.fromPartition(APPLE_MUSIC_AUTH_PARTITION),
+  )
 
   nativeAudioSidecar.setEventListener((event) => {
     if (window.isDestroyed()) return
@@ -418,5 +616,50 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   ipcMain.removeHandler(IpcChannels.SpotifyConnectDispose)
   ipcMain.handle(IpcChannels.SpotifyConnectDispose, () =>
     spotifyConnectSidecar.dispose(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicResolve)
+  ipcMain.handle(
+    IpcChannels.AppleMusicResolve,
+    (_, adamId: string) => resolveAppleMusicTrack(adamId),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicSetWrapperConfig)
+  ipcMain.handle(
+    IpcChannels.AppleMusicSetWrapperConfig,
+    (_, config: AppleMusicWrapperConfig) => {
+      setWrapperConfig(config)
+    },
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicGetLastRequestDebug)
+  ipcMain.handle(IpcChannels.AppleMusicGetLastRequestDebug, () => {
+    return lastAppleMusicRequestDebug
+  })
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicGetDebugReport)
+  ipcMain.handle(IpcChannels.AppleMusicGetDebugReport, async () => {
+    const browserReport = await getAppleMusicDebugReport().catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error)
+      return [
+        '=== Apple Music Debug Report ===',
+        `generatedAt=${new Date().toISOString()}`,
+        `browserReport.error=${reason}`,
+      ].join('\n')
+    })
+    const requestReport = formatLastAppleMusicRequestDebug(
+      lastAppleMusicRequestDebug,
+    )
+    return `${browserReport}\n${requestReport}`
+  })
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicOpenSignInWindow)
+  ipcMain.handle(IpcChannels.AppleMusicOpenSignInWindow, () =>
+    openAppleMusicSignInWindow(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicApiRequest)
+  ipcMain.handle(IpcChannels.AppleMusicApiRequest, (_, payload) =>
+    invokeAppleMusicApi(payload),
   )
 }

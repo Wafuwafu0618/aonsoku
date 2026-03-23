@@ -1,4 +1,5 @@
 export * from './backend'
+export * from './backends/apple-music-backend'
 export * from './backends/internal-backend'
 export * from './backends/native-backend'
 export * from './backends/song-backend-factory'
