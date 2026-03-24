@@ -156,7 +156,17 @@ pub fn handle_command(
                     }
 
                     if state.is_playing() {
-                        runtime.play_sink();
+                        if let Err(message) = runtime.play_sink_checked() {
+                            state.pause_playback();
+                            state.last_tick_instant = None;
+                            emit_command_error(
+                                &request.id,
+                                "playback-pipeline-failed",
+                                &message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
                         state.last_tick_instant = Some(Instant::now());
                     } else {
                         runtime.pause_sink();
@@ -297,7 +307,17 @@ pub fn handle_command(
                                     emit_command_error(&request.id, code, message, None)?;
                                     return Ok(());
                                 }
-                                runtime.play_sink();
+                                if let Err(message) = runtime.play_sink_checked() {
+                                    state.pause_playback();
+                                    state.last_tick_instant = None;
+                                    emit_command_error(
+                                        &request.id,
+                                        "playback-pipeline-failed",
+                                        &message,
+                                        None,
+                                    )?;
+                                    return Ok(());
+                                }
                                 emit_simple_event("play", None, None)?;
                             }
                         } else if state.is_playing() {
@@ -422,7 +442,17 @@ pub fn handle_command(
                             emit_command_error(&request.id, code, message, None)?;
                             return Ok(());
                         }
-                        runtime.play_sink();
+                        if let Err(message) = runtime.play_sink_checked() {
+                            state.pause_playback();
+                            state.last_tick_instant = None;
+                            emit_command_error(
+                                &request.id,
+                                "playback-pipeline-failed",
+                                &message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
                         emit_simple_event("play", None, None)?;
                     } else {
                         state.playback_state = PlaybackState::Ready;
@@ -468,7 +498,17 @@ pub fn handle_command(
                         )?;
                         return Ok(());
                     }
-                    runtime.play_sink();
+                    if let Err(message) = runtime.play_sink_checked() {
+                        state.pause_playback();
+                        state.last_tick_instant = None;
+                        emit_command_error(
+                            &request.id,
+                            "playback-pipeline-failed",
+                            &message,
+                            None,
+                        )?;
+                        return Ok(());
+                    }
                     emit_simple_event("play", None, None)?;
                     emit_response_ok(&request.id, Some(command_result_ok_value()))?;
                 }
@@ -564,7 +604,17 @@ pub fn handle_command(
                     }
 
                     if state.is_playing() {
-                        runtime.play_sink();
+                        if let Err(message) = runtime.play_sink_checked() {
+                            state.pause_playback();
+                            state.last_tick_instant = None;
+                            emit_command_error(
+                                &request.id,
+                                "playback-pipeline-failed",
+                                &message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
                         state.last_tick_instant = Some(Instant::now());
                     } else {
                         runtime.pause_sink();
@@ -638,7 +688,17 @@ pub fn handle_command(
                     }
 
                     if state.is_playing() {
-                        runtime.play_sink();
+                        if let Err(message) = runtime.play_sink_checked() {
+                            state.pause_playback();
+                            state.last_tick_instant = None;
+                            emit_command_error(
+                                &request.id,
+                                "playback-pipeline-failed",
+                                &message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
                         state.last_tick_instant = Some(Instant::now());
                     } else {
                         runtime.pause_sink();
@@ -681,7 +741,17 @@ pub fn handle_command(
                     }
 
                     if state.is_playing() {
-                        runtime.play_sink();
+                        if let Err(message) = runtime.play_sink_checked() {
+                            state.pause_playback();
+                            state.last_tick_instant = None;
+                            emit_command_error(
+                                &request.id,
+                                "playback-pipeline-failed",
+                                &message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
                         state.last_tick_instant = Some(Instant::now());
                     } else {
                         runtime.pause_sink();

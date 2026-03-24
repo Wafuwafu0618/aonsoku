@@ -68,6 +68,9 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   private listenerAttached = false
   private disposed = false
   private currentAdamId: string | null = null
+  private pendingLoad: Promise<void> | null = null
+  private pendingPlay: Promise<void> | null = null
+  private currentLoadedSrc: string | null = null
   private outputMode: NativeAudioOutputMode
 
   constructor(input: AppleMusicPlaybackBackendInput) {
@@ -125,7 +128,11 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       this.currentTimeSeconds = normalizeTime(event.currentTimeSeconds)
     }
     if (typeof event.durationSeconds === 'number') {
-      this.durationSeconds = normalizeTime(event.durationSeconds)
+      const nextDuration = normalizeTime(event.durationSeconds)
+      // Keep known track duration when sidecar emits transient 0.
+      if (nextDuration > 0 || this.durationSeconds <= 0) {
+        this.durationSeconds = nextDuration
+      }
     }
 
     if (event.type === 'ready') {
@@ -206,6 +213,25 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   }
 
   async load(request: PlaybackLoadRequest): Promise<void> {
+    if (this.pendingLoad && this.currentLoadedSrc === request.src) {
+      await this.pendingLoad
+      return
+    }
+
+    const loadTask = this.loadInternal(request)
+    this.pendingLoad = loadTask
+    this.currentLoadedSrc = request.src
+
+    try {
+      await loadTask
+    } finally {
+      if (this.pendingLoad === loadTask) {
+        this.pendingLoad = null
+      }
+    }
+  }
+
+  private async loadInternal(request: PlaybackLoadRequest): Promise<void> {
     const api = readApi()
     if (!api) {
       this.status = 'error'
@@ -229,6 +255,7 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       const adamId = this.extractAdamId(request.src)
       this.currentAdamId = adamId
       logger.info(LOG_TAG, `Resolving adamId: ${adamId}`)
+      logger.info(LOG_TAG, `Load request: autoplay=${request.autoplay ? 'true' : 'false'}`)
 
       // Step 2: Call main process pipeline to fetch, decrypt, and create temp file
       const resolveResult = await api.appleMusicResolve(adamId)
@@ -265,6 +292,21 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
           message: loadResult.error?.message ?? 'Failed to load decrypted Apple Music audio.',
         }
       }
+      // Push metadata to UI immediately, even if sidecar metadata event is delayed.
+      this.status = 'ready'
+      this.emit('loadedmetadata')
+
+      if (request.autoplay) {
+        const playResult = await api.nativeAudioPlay()
+        if (!playResult.ok) {
+          throw {
+            code: playResult.error?.code ?? 'native-audio-play-failed',
+            message: playResult.error?.message ?? 'Failed to start playback after load.',
+          }
+        }
+        this.isPlaying = true
+        this.status = 'playing'
+      }
 
       logger.info(LOG_TAG, `Loaded adamId ${adamId} successfully`)
     } catch (error) {
@@ -277,6 +319,7 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
           ? String((error as { code: unknown }).code)
           : 'apple-music-load-failed'
 
+      logger.error(LOG_TAG, 'Load failed', { code, message })
       this.status = 'error'
       this.errorMessage = message
       this.emit('error')
@@ -285,14 +328,41 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   }
 
   async play(): Promise<void> {
+    if (this.pendingPlay) {
+      await this.pendingPlay
+      return
+    }
+
+    const task = this.playInternal()
+    this.pendingPlay = task
+    try {
+      await task
+    } finally {
+      if (this.pendingPlay === task) {
+        this.pendingPlay = null
+      }
+    }
+  }
+
+  private async playInternal(): Promise<void> {
     const api = readApi()
     if (!api) throw { code: 'native-api-unavailable', message: 'Native audio API is not available.' }
+
+    if (this.pendingLoad) {
+      logger.info(LOG_TAG, 'Play requested while load is in-flight. Waiting for load to finish.')
+      await this.pendingLoad
+    }
 
     await this.ensureInitialized()
     const result = await api.nativeAudioPlay()
     if (!result.ok) {
-      throw { code: 'native-audio-play-failed', message: 'Failed to start playback.' }
+      throw {
+        code: result.error?.code ?? 'native-audio-play-failed',
+        message: result.error?.message ?? 'Failed to start playback.',
+      }
     }
+    this.isPlaying = true
+    this.status = 'playing'
   }
 
   pause(): void {

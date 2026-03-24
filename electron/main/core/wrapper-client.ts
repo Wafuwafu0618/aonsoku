@@ -175,9 +175,8 @@ export async function decryptSamples(
     socket.on('data', (chunk: Buffer) => {
       responseBuf = Buffer.concat([responseBuf, chunk])
 
-      // Parse decrypted chunks from the response buffer
-      while (decryptedChunks.length < expectedChunks && responseBuf.length >= 4) {
-        // Each response is the same size as the input (decrypted in-place)
+      // Wrapper sends decrypted payloads as raw bytes (no size prefix on response).
+      while (decryptedChunks.length < expectedChunks) {
         const expectedSize = encryptedChunks[decryptedChunks.length].length
         if (responseBuf.length < expectedSize) break
 

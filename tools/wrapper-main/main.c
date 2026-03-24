@@ -582,6 +582,9 @@ inline static int new_socket() {
         if (!handle_cpp(connfd)) {
             uint8_t autom = 1;
             _ZN22SVPlaybackLeaseManager12requestLeaseERKb(leaseMgr, &autom);
+            _ZN21SVFootHillSessionCtrl16resetAllContextsEv(FHinstance);
+            preshareCtx = NULL;
+            fprintf(stderr, "[!] decrypt exception: lease/context refreshed\n");
         }
         // if (sigsetjmp(catcher.env, 0) == 0) {
         //     catcher.do_jump = 1;

@@ -694,15 +694,20 @@ impl AudioRuntime {
         Ok(())
     }
 
-    pub fn play_sink(&mut self) {
+    pub fn play_sink_checked(&mut self) -> Result<(), String> {
         if self.active_output_mode == OutputMode::WasapiExclusive {
-            let _ = self.start_exclusive_playback();
-            return;
+            self.start_exclusive_playback()?;
+            return Ok(());
         }
 
         if let Some(shared_output) = &self.shared_cpal_output {
             shared_output.set_playing(true);
         }
+        Ok(())
+    }
+
+    pub fn play_sink(&mut self) {
+        let _ = self.play_sink_checked();
     }
 
     pub fn pause_sink(&mut self) {

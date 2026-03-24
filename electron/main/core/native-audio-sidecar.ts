@@ -48,6 +48,7 @@ interface SidecarEventEnvelope {
 }
 
 interface PendingRequest {
+  command: SidecarCommand
   resolve: (value: unknown) => void
   reject: (reason?: unknown) => void
   timeoutRef: NodeJS.Timeout
@@ -365,6 +366,13 @@ class NativeAudioSidecarClient {
     this.pendingRequests.delete(parsed.id)
 
     if (!parsed.ok) {
+      console.error(
+        '[NativeAudioSidecar] command failed:',
+        `id=${parsed.id}`,
+        `command=${pending.command}`,
+        `code=${parsed.error?.code ?? 'sidecar-command-error'}`,
+        `message=${parsed.error?.message ?? 'Sidecar command returned an error.'}`,
+      )
       pending.reject(
         parsed.error ?? {
           code: 'sidecar-command-error',
@@ -414,6 +422,7 @@ class NativeAudioSidecarClient {
       }, timeoutMs)
 
       this.pendingRequests.set(requestId, {
+        command,
         resolve: (value) => resolve(value as T),
         reject,
         timeoutRef,
