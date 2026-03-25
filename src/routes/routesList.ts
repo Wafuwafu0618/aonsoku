@@ -7,6 +7,7 @@ const LIBRARY = {
   SONGS: '/library/songs',
   ALBUMS: '/library/albums',
   FAVORITES: '/library/favorites',
+  MIXES: '/library/mixes',
   PLAYLISTS: '/library/playlists',
   APPLE_MUSIC: '/library/apple-music',
   PODCASTS: '/library/podcasts',
@@ -56,6 +57,11 @@ const PLAYLIST = {
   PATH: `${LIBRARY.PLAYLISTS}/:playlistId`,
 }
 
+const MIX = {
+  PAGE: (mixId: string) => `${LIBRARY.MIXES}/${mixId}`,
+  PATH: `${LIBRARY.MIXES}/:mixId`,
+}
+
 const PODCASTS = {
   PAGE: (podcastId: string) => `${LIBRARY.PODCASTS}/${podcastId}`,
   PATH: `${LIBRARY.PODCASTS}/:podcastId`,
@@ -65,6 +71,19 @@ const EPISODES = {
   PAGE: (episodeId: string) => `${LIBRARY.EPISODES}/${episodeId}`,
   PATH: `${LIBRARY.EPISODES}/:episodeId`,
   LATEST: `${LIBRARY.EPISODES}/latest`,
+}
+
+const APPLE_MUSIC_GENRE = {
+  PAGE: (genre: string) => `/apple-music/genre/${encodeURIComponent(genre)}`,
+  PATH: '/apple-music/genre/:genre',
+}
+
+const APPLE_MUSIC_ALBUM = {
+  PAGE: (albumId: string, genre?: string) =>
+    genre
+      ? `/apple-music/album/${encodeURIComponent(albumId)}?genre=${encodeURIComponent(genre)}`
+      : `/apple-music/album/${encodeURIComponent(albumId)}`,
+  PATH: '/apple-music/album/:albumId',
 }
 
 const SERVER_CONFIG = '/server-config'
@@ -77,7 +96,10 @@ export const ROUTES = {
   SONGS,
   FAVORITES,
   PLAYLIST,
+  MIX,
   PODCASTS,
   EPISODES,
+  APPLE_MUSIC_GENRE,
+  APPLE_MUSIC_ALBUM,
   SERVER_CONFIG,
 }

@@ -10,6 +10,10 @@ import { ISong } from '@/types/responses/song'
 
 export type ArtistSource = 'all' | 'navidrome' | 'local'
 
+interface GetArtistsOptions {
+  favoritesOnly?: boolean
+}
+
 interface LocalArtistAggregate {
   artist: IArtist
   songs: ISong[]
@@ -43,6 +47,51 @@ function decodeLocalArtistName(artistId: string): string {
   } catch {
     return encodedName
   }
+}
+
+function buildArtistListFromSongs(songs: ISong[]): ISimilarArtist[] {
+  const map = new Map<
+    string,
+    {
+      id: string
+      name: string
+      coverArt: string
+      albumIds: Set<string>
+    }
+  >()
+
+  for (const song of songs) {
+    const artistName = song.artist || 'Unknown Artist'
+    const artistId = song.artistId || createLocalArtistId(artistName)
+
+    if (!map.has(artistId)) {
+      map.set(artistId, {
+        id: artistId,
+        name: artistName,
+        coverArt: song.coverArt || '',
+        albumIds: new Set<string>(),
+      })
+    }
+
+    const aggregate = map.get(artistId)
+    if (!aggregate) continue
+    if (!aggregate.coverArt && song.coverArt) {
+      aggregate.coverArt = song.coverArt
+    }
+    if (song.albumId) {
+      aggregate.albumIds.add(song.albumId)
+    }
+  }
+
+  return [...map.values()]
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      albumCount: item.albumIds.size,
+      coverArt: item.coverArt,
+      artistImageUrl: '',
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function sortSongsForArtist(songA: ISong, songB: ISong): number {
@@ -230,7 +279,20 @@ async function getLocalArtistCollection(): Promise<LocalArtistCollection> {
   }
 }
 
-export async function getArtists(source: ArtistSource = 'all') {
+export async function getArtists(
+  source: ArtistSource = 'all',
+  options: GetArtistsOptions = {},
+) {
+  const favoritesOnly = options.favoritesOnly ?? false
+
+  if (favoritesOnly) {
+    if (source === 'local') return []
+
+    const favoriteResponse = await subsonic.songs.getFavoriteSongs()
+    const favoriteSongs = favoriteResponse?.song ?? []
+    return buildArtistListFromSongs(favoriteSongs)
+  }
+
   if (source === 'navidrome') {
     return subsonic.artists.getAll()
   }

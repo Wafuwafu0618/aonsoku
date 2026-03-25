@@ -57,6 +57,7 @@ export {
   type SpotifyConnectStatusResult,
   type SpotifyConnectTrackInfo,
   type LocalLibraryDirectoryEntry,
+  type BackgroundImageFileEntry,
   type ParametricEqFileEntry,
   type LocalLibraryFileContent,
   type LocalLibraryFileEntry,

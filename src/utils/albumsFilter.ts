@@ -6,6 +6,7 @@ export enum AlbumsSearchParams {
   ArtistName = 'artistName',
   Query = 'query',
   Source = 'source',
+  Scope = 'scope',
 }
 
 export enum PersistedAlbumListKeys {
@@ -116,6 +117,13 @@ export enum SongSourceFilters {
 }
 
 export type SongSourceFilter = `${SongSourceFilters}`
+
+export enum LibraryScopeFilters {
+  All = 'all',
+  Favorites = 'favorites',
+}
+
+export type LibraryScopeFilter = `${LibraryScopeFilters}`
 
 export const sourceFilterValues = [
   {

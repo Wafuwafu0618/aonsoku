@@ -1,5 +1,5 @@
 import { MediaTrack } from '@/domain/entities/track'
-import { AppleMusicSong } from '@/types/responses/apple-music'
+import { AppleMusicAlbum, AppleMusicSong } from '@/types/responses/apple-music'
 
 export function resolveAppleMusicArtworkUrl(
   template: string,
@@ -42,4 +42,12 @@ export function mapAppleMusicSongsToMediaTracks(
   songs: AppleMusicSong[],
 ): MediaTrack[] {
   return songs.map(mapAppleMusicSongToMediaTrack)
+}
+
+export function resolveAppleMusicAlbumDetailId(
+  album: Pick<AppleMusicAlbum, 'id' | 'catalogId'>,
+): string {
+  const catalogId = album.catalogId?.trim()
+  if (catalogId && catalogId.length > 0) return catalogId
+  return album.id
 }

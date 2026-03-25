@@ -17,6 +17,7 @@
     "playlists": "プレイリスト",
     "radios": "ラジオ",
     "podcasts": "ポッドキャスト",
+    "browse": "ブラウズ",
     "emptyPlaylist": "プレイリストがありません"
   },
   "menu": {
@@ -652,6 +653,20 @@
       "privacy": "プライバシーとセキュリティ"
     },
     "appearance": {
+      "background": {
+        "group": "ウィンドウ背景画像",
+        "description": "アプリウィンドウの最下層に画像を表示します。透過テーマと組み合わせて使えます。",
+        "none": "画像が選択されていません",
+        "hint": "画像を選択するとUIの背面に表示されます。",
+        "desktopOnly": "この機能はデスクトップ版でのみ利用できます。",
+        "clear": "クリア",
+        "select": {
+          "label": "背景画像",
+          "button": "画像を選択",
+          "loading": "選択中...",
+          "error": "画像の選択に失敗しました: {{reason}}"
+        }
+      },
       "general": {
         "group": "一般",
         "description": "アプリの外観と表示設定をカスタマイズします。",

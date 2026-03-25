@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { is, platform } from '@electron-toolkit/utils'
 import {
   BrowserWindow,
@@ -16,6 +17,7 @@ import {
   IpcChannels,
   LocalLibraryFileEntry,
   OverlayColors,
+  BackgroundImageFileEntry,
   ParametricEqFileEntry,
   PlayerStatePayload,
   SpotifyConnectOAuthAuthorizeRequest,
@@ -468,6 +470,34 @@ export function setupIpcEvents(window: BrowserWindow | null) {
       return {
         path: selectedPath,
         name: basename(selectedPath),
+      }
+    },
+  )
+
+  ipcMain.removeHandler(IpcChannels.PickBackgroundImageFile)
+  ipcMain.handle(
+    IpcChannels.PickBackgroundImageFile,
+    async (): Promise<BackgroundImageFileEntry | null> => {
+      const result = await dialog.showOpenDialog(window, {
+        title: '背景画像を選択',
+        properties: ['openFile'],
+        filters: [
+          {
+            name: 'Images',
+            extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'avif'],
+          },
+        ],
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      const selectedPath = result.filePaths[0]
+      return {
+        path: selectedPath,
+        name: basename(selectedPath),
+        url: pathToFileURL(selectedPath).toString(),
       }
     },
   )

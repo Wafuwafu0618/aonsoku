@@ -37,6 +37,14 @@ interface LocalAlbumCollection {
   songsByAlbumId: Map<string, ISong[]>
 }
 
+interface FavoriteAlbumsPageParams {
+  offset: number
+  count: number
+  listParams: Required<AlbumListParams>
+  query?: string
+  source: AlbumSource
+}
+
 const navidromeAlbumSearchCountCache = new Map<string, number>()
 const navidromeAlbumSearchCountInFlight = new Map<string, Promise<number>>()
 let localAlbumCollectionInFlight: Promise<LocalAlbumCollection> | null = null
@@ -281,6 +289,101 @@ async function getLocalAlbumCollection(): Promise<LocalAlbumCollection> {
     return await localAlbumCollectionInFlight
   } finally {
     localAlbumCollectionInFlight = null
+  }
+}
+
+async function getFavoriteAlbumsPage({
+  offset,
+  count,
+  listParams,
+  query,
+  source,
+}: FavoriteAlbumsPageParams) {
+  if (source === 'local') {
+    return emptyResponse
+  }
+
+  const favoriteResponse = await subsonic.songs.getFavoriteSongs()
+  const favoriteSongs = favoriteResponse?.song ?? []
+  const albumMap = new Map<string, LocalAlbumAggregate>()
+
+  for (const song of favoriteSongs) {
+    if (!song.albumId) continue
+
+    if (!albumMap.has(song.albumId)) {
+      const aggregate = createEmptyLocalAlbum(song)
+      if (song.starred) {
+        aggregate.album.starred = song.starred
+      }
+      albumMap.set(song.albumId, aggregate)
+    }
+
+    const aggregate = albumMap.get(song.albumId)
+    if (!aggregate) continue
+
+    aggregate.songs.push(song)
+    aggregate.album.songCount += 1
+    aggregate.album.duration += song.duration || 0
+    aggregate.album.playCount = (aggregate.album.playCount ?? 0) + (song.playCount ?? 0)
+
+    if (!aggregate.album.coverArt && song.coverArt) {
+      aggregate.album.coverArt = song.coverArt
+    }
+
+    if (!aggregate.album.genre && song.genre) {
+      aggregate.album.genre = song.genre
+    }
+
+    if (song.genre) {
+      const hasGenre = aggregate.album.genres.some(
+        (genre) => genre.name === song.genre,
+      )
+      if (!hasGenre) {
+        aggregate.album.genres.push({ name: song.genre })
+      }
+    }
+
+    if ((song.year ?? 0) > (aggregate.album.year ?? 0)) {
+      aggregate.album.year = song.year
+    }
+
+    const fallbackCreatedMs = toMs(song.created)
+    const songStarredMs = toMs(song.starred) || fallbackCreatedMs
+    const currentStarredMs = toMs(aggregate.album.starred)
+    if (songStarredMs > currentStarredMs) {
+      aggregate.album.starred = new Date(songStarredMs).toISOString()
+    }
+
+    const currentCreated = toMs(aggregate.album.created)
+    if (fallbackCreatedMs > currentCreated) {
+      aggregate.album.created = new Date(fallbackCreatedMs).toISOString()
+    }
+
+    if (song.discNumber > 0) {
+      const hasDisc = aggregate.album.discTitles.some(
+        (disc) => disc.disc === song.discNumber,
+      )
+      if (!hasDisc) {
+        aggregate.album.discTitles.push({ disc: song.discNumber })
+      }
+    }
+  }
+
+  const albums = [...albumMap.values()].map((aggregate) => {
+    aggregate.album.discTitles = [...aggregate.album.discTitles].sort(
+      (a: DiscTitle, b: DiscTitle) => a.disc - b.disc,
+    )
+    return aggregate.album
+  })
+
+  const filtered = filterLocalAlbumsByParams(albums, listParams, query)
+  const page = filtered.slice(offset, offset + count)
+  const nextOffset = offset + page.length < filtered.length ? offset + count : null
+
+  return {
+    albums: page,
+    nextOffset,
+    albumsCount: filtered.length,
   }
 }
 
@@ -570,9 +673,23 @@ export async function albumSearch({
 }
 
 export async function getAlbumList(
-  params: Required<AlbumListParams> & { source?: AlbumSource },
+  params: Required<AlbumListParams> & {
+    source?: AlbumSource
+    favoritesOnly?: boolean
+    query?: string
+  },
 ) {
-  const { source = 'all' } = params
+  const { source = 'all', favoritesOnly = false, query } = params
+
+  if (favoritesOnly) {
+    return getFavoriteAlbumsPage({
+      offset: params.offset,
+      count: params.size,
+      listParams: params,
+      query,
+      source,
+    })
+  }
 
   if (source === 'local') {
     return fetchLocalAlbumsPage({

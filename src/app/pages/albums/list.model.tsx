@@ -7,10 +7,13 @@ import {
   getAlbumList,
   getArtistDiscography,
 } from '@/queries/albums'
+import { useMediaLibraryMode } from '@/store/app.store'
 import { AlbumListType } from '@/types/responses/album'
 import {
   AlbumsFilters,
   AlbumsSearchParams,
+  LibraryScopeFilter,
+  LibraryScopeFilters,
   SourceFilter,
   SourceFilters,
   YearFilter,
@@ -21,6 +24,7 @@ import { getMainScrollElement } from '@/utils/scrollPageToTop'
 import { SearchParamsHandler } from '@/utils/searchParamsHandler'
 
 export function useAlbumsListModel() {
+  const { mode } = useMediaLibraryMode()
   const [searchParams] = useSearchParams()
   const { getSearchParam } = new SearchParamsHandler(searchParams)
   const defaultOffset = 128
@@ -45,6 +49,11 @@ export function useAlbumsListModel() {
     AlbumsSearchParams.Source,
     SourceFilters.All,
   )
+  const libraryScope = getSearchParam<LibraryScopeFilter>(
+    AlbumsSearchParams.Scope,
+    LibraryScopeFilters.All,
+  )
+  const favoritesOnly = libraryScope === LibraryScopeFilters.Favorites
 
   useEffect(() => {
     scrollDivRef.current = getMainScrollElement()
@@ -61,12 +70,26 @@ export function useAlbumsListModel() {
   const [fromYear, toYear] = getYearRange()
 
   const fetchAlbums = async ({ pageParam = 0 }) => {
-    if (artistId !== '') {
+    if (currentFilter === AlbumsFilters.ByDiscography && artistId !== '') {
       return getArtistDiscography(artistId, {
         source: sourceFilter,
         artistName,
         offset: pageParam,
         count: defaultOffset,
+      })
+    }
+
+    if (favoritesOnly) {
+      return getAlbumList({
+        type: currentFilter,
+        size: defaultOffset,
+        offset: pageParam,
+        fromYear,
+        toYear,
+        genre,
+        source: sourceFilter,
+        favoritesOnly: true,
+        query: currentFilter === AlbumsFilters.Search ? query : '',
       })
     }
 
@@ -91,6 +114,7 @@ export function useAlbumsListModel() {
   }
 
   function enableMainQuery() {
+    if (mode === 'applemusic') return false
     if (currentFilter === AlbumsFilters.ByGenre && genre === '') return false
 
     return true
@@ -105,6 +129,7 @@ export function useAlbumsListModel() {
       query,
       artistId,
       sourceFilter,
+      libraryScope,
     ],
     queryFn: fetchAlbums,
     initialPageParam: 0,

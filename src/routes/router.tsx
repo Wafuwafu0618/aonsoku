@@ -32,10 +32,13 @@ const Favorites = lazy(() => import('@/app/pages/favorites/songlist'))
 const Login = lazy(() => import('@/app/pages/login'))
 const PlaylistsPage = lazy(() => import('@/app/pages/playlists/list'))
 const Playlist = lazy(() => import('@/app/pages/playlists/playlist'))
+const MixPlaylist = lazy(() => import('@/app/pages/mixes/mix-playlist'))
 const Radios = lazy(() => import('@/app/pages/radios/radios-list'))
 const SongList = lazy(() => import('@/app/pages/songs/songlist'))
 const Home = lazy(() => import('@/app/pages/home'))
 const AppleMusic = lazy(() => import('@/app/pages/apple-music'))
+const AppleMusicGenre = lazy(() => import('@/app/pages/apple-music/genre'))
+const AppleMusicAlbum = lazy(() => import('@/app/pages/apple-music/album'))
 const PodcastsList = lazy(() => import('@/app/pages/podcasts/list'))
 const Podcast = lazy(() => import('@/app/pages/podcasts/podcast'))
 const Episode = lazy(() => import('@/app/pages/podcasts/episode'))
@@ -121,6 +124,26 @@ export const router = createHashRouter([
         ),
       },
       {
+        id: 'apple-music-genre',
+        path: ROUTES.APPLE_MUSIC_GENRE.PATH,
+        errorElement: <ErrorPage />,
+        element: (
+          <Suspense fallback={<SongListFallback />}>
+            <AppleMusicGenre />
+          </Suspense>
+        ),
+      },
+      {
+        id: 'apple-music-album',
+        path: ROUTES.APPLE_MUSIC_ALBUM.PATH,
+        errorElement: <ErrorPage />,
+        element: (
+          <Suspense fallback={<AlbumFallback />}>
+            <AppleMusicAlbum />
+          </Suspense>
+        ),
+      },
+      {
         id: 'radios',
         path: ROUTES.LIBRARY.RADIOS,
         errorElement: <ErrorPage />,
@@ -157,6 +180,16 @@ export const router = createHashRouter([
         element: (
           <Suspense fallback={<PlaylistFallback />}>
             <Playlist />
+          </Suspense>
+        ),
+      },
+      {
+        id: 'mix-playlist',
+        path: ROUTES.MIX.PATH,
+        errorElement: <ErrorPage />,
+        element: (
+          <Suspense fallback={<PlaylistFallback />}>
+            <MixPlaylist />
           </Suspense>
         ),
       },

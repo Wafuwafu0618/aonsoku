@@ -1412,6 +1412,137 @@ function buildCatalogAlbumApiScript(payload: AppleMusicApiRequestPayload): strin
         throw new Error('MusicKit instance is not ready in music.apple.com session.');
       };
 
+      const toObjectArray = (value) =>
+        Array.isArray(value)
+          ? value.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+          : [];
+
+      const readFirstResource = (root) => {
+        if (!root || typeof root !== 'object') return null;
+        const data = toObjectArray(root.data);
+        if (data.length > 0) return data[0];
+        const results = root.results;
+        if (!results || typeof results !== 'object') return null;
+        const nestedData = toObjectArray(results.data);
+        return nestedData.length > 0 ? nestedData[0] : null;
+      };
+
+      const readTracks = (resource) => {
+        if (!resource || typeof resource !== 'object') return [];
+        const relationships =
+          resource.relationships && typeof resource.relationships === 'object'
+            ? resource.relationships
+            : null;
+        const tracks =
+          relationships &&
+          relationships.tracks &&
+          typeof relationships.tracks === 'object'
+            ? relationships.tracks
+            : null;
+        return toObjectArray(tracks && tracks.data);
+      };
+
+      const upsertTracks = (root, tracksData) => {
+        if (!root || typeof root !== 'object') return false;
+        if (!Array.isArray(tracksData) || tracksData.length === 0) return false;
+        const resource = readFirstResource(root);
+        if (!resource || typeof resource !== 'object') return false;
+
+        if (!resource.relationships || typeof resource.relationships !== 'object') {
+          resource.relationships = {};
+        }
+        if (
+          !resource.relationships.tracks ||
+          typeof resource.relationships.tracks !== 'object'
+        ) {
+          resource.relationships.tracks = {};
+        }
+        resource.relationships.tracks.data = tracksData;
+        return true;
+      };
+
+      const readNextOffset = (root) => {
+        if (!root || typeof root !== 'object') return null;
+        const nextValue = typeof root.next === 'string' ? root.next : '';
+        if (!nextValue) return null;
+        try {
+          const parsed = new URL(nextValue, 'https://music.apple.com');
+          const offsetRaw = parsed.searchParams.get('offset');
+          const offset = Number(offsetRaw);
+          if (Number.isFinite(offset) && offset >= 0) {
+            return Math.floor(offset);
+          }
+        } catch {}
+        return null;
+      };
+
+      const fetchAllTracks = async (api, path) => {
+        const merged = [];
+        const seen = new Set();
+        let offset = 0;
+
+        for (let i = 0; i < 20; i += 1) {
+          const pageRaw = await api.music(path + '/tracks', {
+            limit: 100,
+            offset,
+          });
+          const page = toObjectArray(pageRaw && pageRaw.data);
+          for (const track of page) {
+            const id = typeof track.id === 'string' ? track.id : '';
+            const type = typeof track.type === 'string' ? track.type : '';
+            const key = id + ':' + type;
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            merged.push(track);
+          }
+
+          const nextOffset = readNextOffset(pageRaw);
+          if (nextOffset === null) {
+            if (page.length < 100) break;
+            offset += 100;
+          } else {
+            if (nextOffset <= offset) break;
+            offset = nextOffset;
+          }
+        }
+
+        return merged;
+      };
+
+      const fetchSongsByAlbumFilter = async (api, storefrontId, id) => {
+        const merged = [];
+        const seen = new Set();
+        let offset = 0;
+
+        for (let i = 0; i < 20; i += 1) {
+          const pageRaw = await api.music('/v1/catalog/' + storefrontId + '/songs', {
+            'filter[albums]': id,
+            limit: 100,
+            offset,
+          });
+          const page = toObjectArray(pageRaw && pageRaw.data);
+          for (const song of page) {
+            const songId = typeof song.id === 'string' ? song.id : '';
+            const songType = typeof song.type === 'string' ? song.type : '';
+            const key = songId + ':' + songType;
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            merged.push(song);
+          }
+
+          const nextOffset = readNextOffset(pageRaw);
+          if (nextOffset === null) {
+            if (page.length < 100) break;
+            offset += 100;
+          } else {
+            if (nextOffset <= offset) break;
+            offset = nextOffset;
+          }
+        }
+
+        return merged;
+      };
+
       try {
         const instance = await ensureMusicKitInstance();
         const api = instance.api;
@@ -1419,10 +1550,87 @@ function buildCatalogAlbumApiScript(payload: AppleMusicApiRequestPayload): strin
         const id = String(payload.id || '').trim();
         if (!id) throw new Error('album id is required.');
 
-        const raw = await api.music('/v1/catalog/' + storefrontId + '/albums/' + id, {
-          include: 'tracks',
-        });
-        return { ok: true, data: raw };
+        const catalogPath = '/v1/catalog/' + storefrontId + '/albums/' + id;
+
+        let catalogRaw = null;
+        try {
+          catalogRaw = await api.music(catalogPath, { include: 'tracks' });
+        } catch {}
+
+        const catalogWithIncludeTracks = readTracks(readFirstResource(catalogRaw));
+        if (catalogRaw && catalogWithIncludeTracks.length > 0) {
+          return { ok: true, data: catalogRaw };
+        }
+
+        if (!catalogRaw) {
+          try {
+            catalogRaw = await api.music(catalogPath);
+          } catch {}
+        }
+
+        if (catalogRaw) {
+          try {
+            const tracks = await fetchAllTracks(api, catalogPath);
+            if (tracks.length > 0) {
+              upsertTracks(catalogRaw, tracks);
+            }
+          } catch {}
+          const catalogTracksAfterFallback = readTracks(readFirstResource(catalogRaw));
+          if (catalogTracksAfterFallback.length > 0) {
+            return { ok: true, data: catalogRaw };
+          }
+        }
+
+        const libraryPath = '/v1/me/library/albums/' + id;
+        let libraryRaw = null;
+        try {
+          libraryRaw = await api.music(libraryPath, { include: 'tracks,catalog' });
+        } catch {}
+
+        const libraryWithIncludeTracks = readTracks(readFirstResource(libraryRaw));
+        if (libraryRaw && libraryWithIncludeTracks.length > 0) {
+          return { ok: true, data: libraryRaw };
+        }
+
+        if (libraryRaw) {
+          try {
+            const tracks = await fetchAllTracks(api, libraryPath);
+            if (tracks.length > 0) {
+              upsertTracks(libraryRaw, tracks);
+            }
+          } catch {}
+          const libraryTracksAfterFallback = readTracks(readFirstResource(libraryRaw));
+          if (libraryTracksAfterFallback.length > 0) {
+            return { ok: true, data: libraryRaw };
+          }
+        }
+
+        try {
+          const songsByFilter = await fetchSongsByAlbumFilter(
+            api,
+            storefrontId,
+            id,
+          );
+          if (songsByFilter.length > 0) {
+            if (catalogRaw) {
+              upsertTracks(catalogRaw, songsByFilter);
+              return { ok: true, data: catalogRaw };
+            }
+            if (libraryRaw) {
+              upsertTracks(libraryRaw, songsByFilter);
+              return { ok: true, data: libraryRaw };
+            }
+          }
+        } catch {}
+
+        if (catalogRaw && readFirstResource(catalogRaw)) {
+          return { ok: true, data: catalogRaw };
+        }
+        if (libraryRaw && readFirstResource(libraryRaw)) {
+          return { ok: true, data: libraryRaw };
+        }
+
+        throw new Error('Album not found in catalog/library.');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {

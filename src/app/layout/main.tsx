@@ -16,7 +16,9 @@ export function MainRoutes() {
         id="main-scroll-area"
         className="w-full bg-background-foreground"
       >
-        <Outlet />
+        <div key={pathname} className="route-transition-enter h-full w-full">
+          <Outlet />
+        </div>
       </ScrollArea>
     </main>
   )

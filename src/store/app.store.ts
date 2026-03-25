@@ -122,6 +122,26 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
                 state.pages.imagesCacheLayerEnabled = value
               })
             },
+            backgroundImageUrl: null,
+            backgroundImageName: null,
+            setBackgroundImage: (value) => {
+              set((state) => {
+                state.pages.backgroundImageUrl = value?.url ?? null
+                state.pages.backgroundImageName = value?.name ?? null
+              })
+            },
+            mediaLibraryMode: 'navidrome' as const,
+            setMediaLibraryMode: (mode) => {
+              set((state) => {
+                state.pages.mediaLibraryMode = mode
+              })
+            },
+            appleMusicFavoriteGenres: [] as string[],
+            setAppleMusicFavoriteGenres: (genres) => {
+              set((state) => {
+                state.pages.appleMusicFavoriteGenres = genres
+              })
+            },
           },
           desktop: {
             data: {
@@ -414,4 +434,22 @@ export const useAppImagesCacheLayer = () =>
   useAppStore((state) => ({
     imagesCacheLayerEnabled: state.pages.imagesCacheLayerEnabled,
     setImagesCacheLayerEnabled: state.pages.setImagesCacheLayerEnabled,
+  }))
+export const useAppBackgroundImage = () =>
+  useAppStore((state) => ({
+    backgroundImageUrl: state.pages.backgroundImageUrl,
+    backgroundImageName: state.pages.backgroundImageName,
+    setBackgroundImage: state.pages.setBackgroundImage,
+  }))
+
+export const useMediaLibraryMode = () =>
+  useAppStore((state) => ({
+    mode: state.pages.mediaLibraryMode,
+    setMode: state.pages.setMediaLibraryMode,
+  }))
+
+export const useAppleMusicFavoriteGenres = () =>
+  useAppStore((state) => ({
+    genres: state.pages.appleMusicFavoriteGenres,
+    setGenres: state.pages.setAppleMusicFavoriteGenres,
   }))

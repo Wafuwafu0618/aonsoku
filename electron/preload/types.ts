@@ -36,6 +36,7 @@ export enum IpcChannels {
   DownloadProgress = 'download-progress',
   UpdateDownloaded = 'update-downloaded',
   PickLocalLibraryDirectory = 'pick-local-library-directory',
+  PickBackgroundImageFile = 'pick-background-image-file',
   PickParametricEqFile = 'pick-parametric-eq-file',
   ListLocalLibraryFiles = 'list-local-library-files',
   ReadLocalLibraryFile = 'read-local-library-file',
@@ -77,6 +78,12 @@ export interface LocalLibraryDirectoryEntry {
 export interface ParametricEqFileEntry {
   path: string
   name: string
+}
+
+export interface BackgroundImageFileEntry {
+  path: string
+  name: string
+  url: string
 }
 
 export interface LocalLibraryFileEntry {
@@ -404,6 +411,7 @@ export interface IAonsokuAPI {
   onDownloadProgress: (callback: (progress: ProgressInfo) => void) => void
   onUpdateDownloaded: (callback: (info: UpdateDownloadedEvent) => void) => void
   pickLocalLibraryDirectory: () => Promise<LocalLibraryDirectoryEntry | null>
+  pickBackgroundImageFile: () => Promise<BackgroundImageFileEntry | null>
   pickParametricEqFile: () => Promise<ParametricEqFileEntry | null>
   listLocalLibraryFiles: (
     directories: string[],

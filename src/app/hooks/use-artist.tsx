@@ -9,10 +9,13 @@ import {
 } from '@/queries/artists'
 import { queryKeys } from '@/utils/queryKeys'
 
-export const useGetArtists = (source: ArtistSource = 'all') => {
+export const useGetArtists = (
+  source: ArtistSource = 'all',
+  options: { favoritesOnly?: boolean } = {},
+) => {
   return useQuery({
-    queryKey: [queryKeys.artist.all, source],
-    queryFn: () => getArtists(source),
+    queryKey: [queryKeys.artist.all, source, options.favoritesOnly ?? false],
+    queryFn: () => getArtists(source, options),
   })
 }
 

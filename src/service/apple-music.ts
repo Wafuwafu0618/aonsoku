@@ -155,6 +155,21 @@ function resolveSongAdamId(resource: UnknownRecord): string {
   )
 }
 
+function resolveAlbumCatalogId(resource: UnknownRecord): string {
+  const attributes = getResourceAttributes(resource)
+  const playParams = asRecord(attributes.playParams) ?? {}
+  const catalog = asRecord(getResourceRelationships(resource).catalog)
+  const catalogData = asRecordArray(catalog?.data)
+
+  return (
+    asString(playParams.catalogId) ??
+    asString(catalogData[0]?.id) ??
+    asString(playParams.id) ??
+    asString(resource.id) ??
+    ''
+  )
+}
+
 function mapSong(resource: UnknownRecord): AppleMusicSong {
   const attributes = getResourceAttributes(resource)
   const artwork = asRecord(attributes.artwork)
@@ -185,11 +200,12 @@ function mapAlbum(resource: UnknownRecord): AppleMusicAlbum {
   const attributes = getResourceAttributes(resource)
   const relationships = getResourceRelationships(resource)
   const artwork = asRecord(attributes.artwork)
-  const tracks = asRecord(relationships.tracks)
-  const songResources = asRecordArray(tracks?.data)
+  const songResources = readSectionData(relationships.tracks)
+  const catalogId = resolveAlbumCatalogId(resource)
 
   return {
-    id: asString(resource.id) ?? '',
+    id: asString(resource.id) ?? catalogId,
+    catalogId,
     name: asString(attributes.name) ?? '',
     artistName: asString(attributes.artistName) ?? '',
     artworkUrl: toArtworkUrl(asString(artwork?.url)),
@@ -206,8 +222,7 @@ function mapPlaylist(resource: UnknownRecord): AppleMusicPlaylist {
   const attributes = getResourceAttributes(resource)
   const relationships = getResourceRelationships(resource)
   const artwork = asRecord(attributes.artwork)
-  const tracks = asRecord(relationships.tracks)
-  const songResources = asRecordArray(tracks?.data)
+  const songResources = readSectionData(relationships.tracks)
 
   return {
     id: asString(resource.id) ?? '',
@@ -220,6 +235,45 @@ function mapPlaylist(resource: UnknownRecord): AppleMusicPlaylist {
     songs: songResources.map(mapSong),
     url: asString(attributes.url),
   }
+}
+
+function normalizeTypeName(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isSongResource(resource: UnknownRecord): boolean {
+  if (normalizeTypeName(resource.type).includes('song')) return true
+
+  const attributes = getResourceAttributes(resource)
+  const playParams = asRecord(attributes.playParams) ?? {}
+  if (normalizeTypeName(playParams.kind).includes('song')) return true
+
+  const url = normalizeTypeName(attributes.url)
+  return url.includes('/song/')
+}
+
+function readIncludedSongs(root: UnknownRecord): AppleMusicSong[] {
+  const included = asRecordArray(root.included)
+  if (included.length === 0) return []
+
+  const songs = included.filter((resource) => isSongResource(resource))
+  return songs.map(mapSong)
+}
+
+function normalizeLooseText(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function isAlbumNameMatch(target: string, candidate: string): boolean {
+  const normalizedTarget = normalizeLooseText(target)
+  const normalizedCandidate = normalizeLooseText(candidate)
+  if (!normalizedTarget || !normalizedCandidate) return false
+  if (normalizedTarget === normalizedCandidate) return true
+  return (
+    normalizedCandidate.includes(normalizedTarget) ||
+    normalizedTarget.includes(normalizedCandidate)
+  )
 }
 
 function readSearchSection(root: UnknownRecord, key: string): UnknownRecord[] {
@@ -523,7 +577,62 @@ class AppleMusicServiceImpl implements AppleMusicService {
       throw new AppleMusicServiceError('parse-failed', 'Album not found in Apple Music catalog.')
     }
 
-    return mapAlbum(firstResource)
+    const mappedAlbum = mapAlbum(firstResource)
+    if (mappedAlbum.songs.length > 0) {
+      return mappedAlbum
+    }
+
+    const includedSongs = readIncludedSongs(payload)
+    if (includedSongs.length > 0) {
+      return {
+        ...mappedAlbum,
+        songs: includedSongs,
+        trackCount: Math.max(mappedAlbum.trackCount, includedSongs.length),
+      }
+    }
+
+    // Last-resort fallback: Apple Music API sometimes omits track relationships.
+    // Try recovering track list from search and keep only same-album songs.
+    const fallbackQuery = [mappedAlbum.artistName, mappedAlbum.name]
+      .filter((part) => part.trim().length > 0)
+      .join(' ')
+      .trim()
+
+    if (fallbackQuery.length === 0) {
+      return mappedAlbum
+    }
+
+    try {
+      const fallbackSearch = await this.search(fallbackQuery, ['songs'])
+      const targetArtistName = normalizeLooseText(mappedAlbum.artistName)
+      const albumMatchedSongs = fallbackSearch.songs.filter((song) =>
+        isAlbumNameMatch(mappedAlbum.name, song.albumName),
+      )
+
+      const strictMatchedSongs =
+        targetArtistName.length === 0
+          ? albumMatchedSongs
+          : albumMatchedSongs.filter(
+              (song) => normalizeLooseText(song.artistName) === targetArtistName,
+            )
+
+      const albumSongs =
+        strictMatchedSongs.length > 0
+          ? strictMatchedSongs
+          : albumMatchedSongs
+
+      if (albumSongs.length === 0) {
+        return mappedAlbum
+      }
+
+      return {
+        ...mappedAlbum,
+        songs: albumSongs,
+        trackCount: Math.max(mappedAlbum.trackCount, albumSongs.length),
+      }
+    } catch {
+      return mappedAlbum
+    }
   }
 
   async getCatalogPlaylist(id: string): Promise<AppleMusicPlaylist> {

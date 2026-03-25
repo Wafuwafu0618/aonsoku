@@ -15,6 +15,7 @@ export interface AppleMusicSong {
 
 export interface AppleMusicAlbum {
   id: string
+  catalogId?: string
   name: string
   artistName: string
   artworkUrl: string

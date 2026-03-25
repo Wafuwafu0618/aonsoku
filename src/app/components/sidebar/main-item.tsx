@@ -1,4 +1,3 @@
-import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { MainSidebarMenuButton } from '@/app/components/ui/main-sidebar'
@@ -18,7 +17,6 @@ export function SidebarMainItem({ item }: { item: ISidebarItem }) {
     >
       <Link
         to={item.route}
-        className={clsx(active && 'pointer-events-none')}
       >
         <item.icon />
         {t(item.title)}

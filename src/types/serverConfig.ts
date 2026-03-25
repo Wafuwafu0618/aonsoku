@@ -15,6 +15,7 @@ export interface IServerConfig {
 }
 
 export type PageViewType = 'grid' | 'table'
+export type MediaLibraryMode = 'navidrome' | 'applemusic'
 
 interface IAppPages {
   showInfoPanel: boolean
@@ -25,6 +26,13 @@ interface IAppPages {
   setArtistsPageViewType: (type: PageViewType) => void
   imagesCacheLayerEnabled: boolean
   setImagesCacheLayerEnabled: (value: boolean) => void
+  backgroundImageUrl: string | null
+  backgroundImageName: string | null
+  setBackgroundImage: (value: { url: string; name: string } | null) => void
+  mediaLibraryMode: MediaLibraryMode
+  setMediaLibraryMode: (mode: MediaLibraryMode) => void
+  appleMusicFavoriteGenres: string[]
+  setAppleMusicFavoriteGenres: (genres: string[]) => void
 }
 
 export interface IAppData extends IServerConfig {

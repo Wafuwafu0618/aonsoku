@@ -10,11 +10,22 @@ type AlbumCardProps = {
   album: Albums
 }
 
+const APPLE_MUSIC_ALBUM_ID_PREFIX = 'apple-music:'
+
 function AlbumCard({ album }: AlbumCardProps) {
   const { setSongList } = usePlayerActions()
+  const isAppleMusicAlbum = album.id.startsWith(APPLE_MUSIC_ALBUM_ID_PREFIX)
+  const resolvedAlbumId = isAppleMusicAlbum
+    ? album.id.slice(APPLE_MUSIC_ALBUM_ID_PREFIX.length)
+    : album.id
+  const albumLink = isAppleMusicAlbum
+    ? ROUTES.APPLE_MUSIC_ALBUM.PAGE(resolvedAlbumId)
+    : ROUTES.ALBUM.PAGE(resolvedAlbumId)
 
   async function handlePlayAlbum() {
-    const response = await getAlbumById(album.id)
+    if (isAppleMusicAlbum) return
+
+    const response = await getAlbumById(resolvedAlbumId)
 
     if (response) {
       setSongList(response.song, 0)
@@ -23,14 +34,16 @@ function AlbumCard({ album }: AlbumCardProps) {
 
   return (
     <PreviewCard.Root>
-      <PreviewCard.ImageWrapper link={ROUTES.ALBUM.PAGE(album.id)}>
+      <PreviewCard.ImageWrapper link={albumLink}>
         <ImageLoader id={album.coverArt} type="album" size={300}>
           {(src) => <PreviewCard.Image src={src} alt={album.name} />}
         </ImageLoader>
-        <PreviewCard.PlayButton onClick={handlePlayAlbum} />
+        {!isAppleMusicAlbum && (
+          <PreviewCard.PlayButton onClick={handlePlayAlbum} />
+        )}
       </PreviewCard.ImageWrapper>
       <PreviewCard.InfoWrapper>
-        <PreviewCard.Title link={ROUTES.ALBUM.PAGE(album.id)}>
+        <PreviewCard.Title link={albumLink}>
           {album.name}
         </PreviewCard.Title>
         <PreviewCard.Subtitle

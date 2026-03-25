@@ -1,7 +1,11 @@
 import { Loader2, Music2, Play, Search } from 'lucide-react'
 import { FormEvent, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
-import { mapAppleMusicSongToMediaTrack, resolveAppleMusicArtworkUrl } from '@/domain/mappers/apple-music'
+import {
+  mapAppleMusicSongToMediaTrack,
+  resolveAppleMusicAlbumDetailId,
+  resolveAppleMusicArtworkUrl,
+} from '@/domain/mappers/apple-music'
 import { MediaTrack } from '@/domain/entities/track'
 import { Button } from '@/app/components/ui/button'
 import { Input } from '@/app/components/ui/input'
@@ -411,7 +415,9 @@ export default function AppleMusicPage() {
                     title={album.name}
                     subtitle={album.artistName}
                     artworkUrl={album.artworkUrl}
-                    onOpen={() => handleOpenAlbum(album.id)}
+                    onOpen={() =>
+                      handleOpenAlbum(resolveAppleMusicAlbumDetailId(album))
+                    }
                   />
                 ))
               )}
@@ -518,7 +524,9 @@ export default function AppleMusicPage() {
                     title={album.name}
                     subtitle={album.artistName}
                     artworkUrl={album.artworkUrl}
-                    onOpen={() => handleOpenAlbum(album.id)}
+                    onOpen={() =>
+                      handleOpenAlbum(resolveAppleMusicAlbumDetailId(album))
+                    }
                   />
                 ))
               )}
@@ -597,7 +605,9 @@ export default function AppleMusicPage() {
                       title={album.name}
                       subtitle={album.artistName}
                       artworkUrl={album.artworkUrl}
-                      onOpen={() => handleOpenAlbum(album.id)}
+                      onOpen={() =>
+                        handleOpenAlbum(resolveAppleMusicAlbumDetailId(album))
+                      }
                     />
                   ))
                 )}
@@ -641,7 +651,9 @@ export default function AppleMusicPage() {
                         title={album.name}
                         subtitle={album.artistName}
                         artworkUrl={album.artworkUrl}
-                        onOpen={() => handleOpenAlbum(album.id)}
+                        onOpen={() =>
+                          handleOpenAlbum(resolveAppleMusicAlbumDetailId(album))
+                        }
                       />
                     ))
                   )}

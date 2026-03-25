@@ -6,15 +6,19 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   body.windows-linux {
     @apply antialiased;
   }
+
   body.mac {
     @apply subpixel-antialiased;
   }
+
   :root {
     --header-height: 44px;
     --player-height: 96px;
@@ -23,18 +27,10 @@
     --shadow-header-height: 80px;
     --shadow-header-distance: calc(var(--shadow-header-height) + 1.5rem);
 
-    --empty-content-height: calc(
-      100vh -
-      var(--header-height) -
-      var(--shadow-header-height) -
-      var(--player-height)
-    );
+    --empty-content-height: calc(100vh - var(--header-height) - var(--shadow-header-height) - var(--player-height));
 
     --toastify-toast-top: calc(var(--header-height) + 0.25rem);
-    --toastify-toast-container-height: calc(
-      var(--shadow-header-height) -
-      0.5rem
-    );
+    --toastify-toast-container-height: calc(var(--shadow-header-height) - 0.5rem);
 
     --windows-red: 5 75% 44%;
   }
@@ -189,18 +185,22 @@ img {
   width: 7px;
   height: 0px;
 }
+
 ::-webkit-scrollbar-button {
   width: 7px;
   height: 0px;
 }
+
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--border));
   border-radius: 7px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 7px;
 }
+
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
@@ -219,7 +219,7 @@ img {
   @apply rounded-full default-ring;
 }
 
-.user-dropdown-trigger[data-state="open"] > :first-child {
+.user-dropdown-trigger[data-state="open"]> :first-child {
   @apply bg-accent;
 }
 
@@ -263,6 +263,8 @@ svg#bars .eq-bar {
 .minato-wave,
 .minato-wave body {
   background: hsl(270 100% 98% / 0.06) !important;
+  --mw-glass-bg: hsl(270 100% 98% / 0.1);
+  --mw-glass-backdrop: blur(46px) saturate(180%) brightness(1.1);
 }
 
 .minato-wave body::before {
@@ -272,21 +274,15 @@ svg#bars .eq-bar {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(
-      1600px 920px at 8% -22%,
+    radial-gradient(1600px 920px at 8% -22%,
       hsl(269 100% 89% / 0.1),
-      transparent 54%
-    ),
-    radial-gradient(
-      1400px 920px at 98% 2%,
+      transparent 54%),
+    radial-gradient(1400px 920px at 98% 2%,
       hsl(270 100% 86% / 0.08),
-      transparent 52%
-    ),
-    radial-gradient(
-      1000px 700px at 50% 42%,
+      transparent 52%),
+    radial-gradient(1000px 700px at 50% 42%,
       hsl(300 100% 97% / 0.1),
-      transparent 68%
-    );
+      transparent 68%);
 }
 
 .minato-wave #root {
@@ -296,26 +292,50 @@ svg#bars .eq-bar {
 }
 
 /* Keep the app base truly transparent */
-.minato-wave [data-slot='sidebar-wrapper'],
-.minato-wave [data-slot='sidebar-inset'],
-.minato-wave #main-scroll-area,
-.minato-wave #main-scroll-area > [data-radix-scroll-area-viewport],
-.minato-wave #scroll-viewport,
-.minato-wave main {
+.minato-wave [data-slot='sidebar-wrapper'] {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-/* Glass surfaces */
+/* Single-glass-layer strategy: keep shell panes transparent */
 .minato-wave [data-slot='sidebar-inner'],
+.minato-wave [data-slot='sidebar-inset'],
+.minato-wave #main-scroll-area,
+.minato-wave #main-scroll-area>[data-radix-scroll-area-viewport] {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Keep structural chrome transparent; glass is drawn by app-content-glass-layer */
 .minato-wave header,
 .minato-wave footer,
 .minato-wave .main-drawer {
-  background: hsl(270 100% 98% / 0.08) !important;
-  backdrop-filter: blur(46px) saturate(180%) brightness(1.1);
-  -webkit-backdrop-filter: blur(46px) saturate(180%) brightness(1.1);
-  background-clip: padding-box;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+@keyframes route-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.route-transition-enter {
+  animation: route-enter 150ms ease-out;
+  will-change: opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-transition-enter {
+    animation: none;
+  }
 }
 
 .minato-wave [class*='bg-background-foreground'] {
@@ -335,13 +355,35 @@ svg#bars .eq-bar {
   --tw-gradient-to: hsl(270 100% 98% / 0.06) !important;
 }
 
+/* Sidebar/Main seam: render only a single 1px divider on sidebar edge */
+.minato-wave [data-slot='sidebar-inset']::before {
+  content: none;
+}
+
+.minato-wave [data-slot='sidebar'][data-side='left'] [data-slot='sidebar-inner'] {
+  box-shadow: inset -1px 0 0 hsl(var(--border) / 0.56);
+}
+
+.minato-wave [data-slot='sidebar'][data-side='right'] [data-slot='sidebar-inner'] {
+  box-shadow: inset 1px 0 0 hsl(var(--border) / 0.56);
+}
+
+/* Keep resize rail invisible in Minato Wave (class* bg-background catches hover utility names). */
+.minato-wave [data-slot='sidebar-rail'] {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* Re-assert transparent app base after generic bg-* overrides */
 .minato-wave [data-slot='sidebar-wrapper'],
+.minato-wave [data-slot='sidebar-inner'],
 .minato-wave [data-slot='sidebar-inset'],
 .minato-wave #main-scroll-area,
-.minato-wave #main-scroll-area > [data-radix-scroll-area-viewport],
-.minato-wave #scroll-viewport,
-.minato-wave main {
+.minato-wave #main-scroll-area>[data-radix-scroll-area-viewport],
+.minato-wave header,
+.minato-wave footer,
+.minato-wave .main-drawer {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -466,10 +508,7 @@ svg#bars .eq-bar {
 }
 
 /* Reduce heavy effects while maximized to avoid resize flicker on Windows */
-.minato-wave.window-maximized [data-slot='sidebar-inner'],
-.minato-wave.window-maximized header,
-.minato-wave.window-maximized footer,
-.minato-wave.window-maximized .main-drawer {
+.minato-wave.window-maximized .app-content-glass-layer {
   backdrop-filter: blur(22px) saturate(135%) brightness(1.04) !important;
   -webkit-backdrop-filter: blur(22px) saturate(135%) brightness(1.04) !important;
 }
@@ -495,40 +534,48 @@ svg#bars .eq-bar--4 {
 }
 
 @keyframes eq-1 {
+
   0%,
   100% {
     transform: scaleY(0.4);
   }
+
   50% {
     transform: scaleY(0.8);
   }
 }
 
 @keyframes eq-2 {
+
   0%,
   100% {
     transform: scaleY(0.9);
   }
+
   50% {
     transform: scaleY(0.4);
   }
 }
 
 @keyframes eq-3 {
+
   0%,
   100% {
     transform: scaleY(0.7);
   }
+
   50% {
     transform: scaleY(1);
   }
 }
 
 @keyframes eq-4 {
+
   0%,
   100% {
     transform: scaleY(0.6);
   }
+
   50% {
     transform: scaleY(1);
   }
@@ -536,6 +583,7 @@ svg#bars .eq-bar--4 {
 
 #sync-lyrics-box,
 .lrc-box {
+
   /* webkit */
   &::-webkit-scrollbar {
     width: 0;
@@ -558,7 +606,43 @@ svg#bars .eq-bar--4 {
   @apply bg-foreground/30 hover:bg-foreground/40;
 }
 
+.app-window-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.76) saturate(0.9) contrast(1.02);
+  transform: scale(1.01);
+}
+
+.app-window-background-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+      hsl(252 32% 10% / 0.22),
+      hsl(252 32% 10% / 0.34));
+}
+
+.app-content-glass-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.minato-wave .app-content-glass-layer {
+  background: var(--mw-glass-bg);
+  backdrop-filter: var(--mw-glass-backdrop);
+  -webkit-backdrop-filter: var(--mw-glass-backdrop);
+}
+
 @media all and (display-mode: picture-in-picture) {
+
   body,
   html {
     @apply w-full h-full overflow-hidden p-0 m-0;
@@ -568,6 +652,7 @@ svg#bars .eq-bar--4 {
 div[data-test-id="table-row"][data-state="selected"],
 div[data-test-id="table-row"].row-active,
 div[data-test-id="table-row"]:hover {
+
   & a,
   & span {
     @apply text-foreground;

@@ -22,6 +22,7 @@ type SongSearchParams = Required<
   Pick<SearchQueryOptions, 'query' | 'songCount' | 'songOffset'>
 > & {
   source?: 'all' | 'navidrome' | 'local' | 'spotify'
+  favoritesOnly?: boolean
 }
 
 export interface SongSearchResult {
@@ -231,10 +232,61 @@ async function getLocalSongsCount(query: string): Promise<number> {
   return getTracksCount()
 }
 
+function normalizeForSearch(value: string | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function filterFavoriteSongsByQuery(songs: ISong[], query: string): ISong[] {
+  const normalizedQuery = normalizeForSearch(query)
+  if (!normalizedQuery) return songs
+
+  return songs.filter((song) => {
+    const title = normalizeForSearch(song.title)
+    const artist = normalizeForSearch(song.artist)
+    const album = normalizeForSearch(song.album)
+    return (
+      title.includes(normalizedQuery) ||
+      artist.includes(normalizedQuery) ||
+      album.includes(normalizedQuery)
+    )
+  })
+}
+
+function filterFavoriteSongsBySource(
+  songs: ISong[],
+  source: 'all' | 'navidrome' | 'local' | 'spotify',
+): ISong[] {
+  if (source === 'all' || source === 'navidrome') return songs
+  return []
+}
+
+function paginateSongs(
+  songs: ISong[],
+  songOffset: number,
+  songCount: number,
+): SongSearchResult {
+  const totalCount = songs.length
+  const pageSongs = songs.slice(songOffset, songOffset + songCount)
+  return {
+    songs: pageSongs,
+    nextOffset:
+      songOffset + pageSongs.length < totalCount ? songOffset + songCount : null,
+    totalCount,
+  }
+}
+
 export async function songsSearch(
   params: SongSearchParams,
 ): Promise<SongSearchResult> {
-  const { source = 'all', query, songCount, songOffset } = params
+  const { source = 'all', query, songCount, songOffset, favoritesOnly = false } = params
+
+  if (favoritesOnly) {
+    const favoriteResponse = await subsonic.songs.getFavoriteSongs()
+    const favoriteSongs = favoriteResponse?.song ?? []
+    const sourceFiltered = filterFavoriteSongsBySource(favoriteSongs, source)
+    const queryFiltered = filterFavoriteSongsByQuery(sourceFiltered, query)
+    return paginateSongs(queryFiltered, songOffset, songCount)
+  }
 
   if (source === 'navidrome') {
     const songs = await fetchNavidromeSongsPage(query, songOffset, songCount)

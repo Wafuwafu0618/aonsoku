@@ -13,10 +13,16 @@ import { DataTable } from '@/app/components/ui/data-table'
 import { useGetArtists } from '@/app/hooks/use-artist'
 import { useSongList } from '@/app/hooks/use-song-list'
 import { artistsColumns } from '@/app/tables/artists-columns'
-import { useAppArtistsViewType } from '@/store/app.store'
+import { useAppArtistsViewType, useMediaLibraryMode } from '@/store/app.store'
 import { usePlayerActions } from '@/store/player.store'
 import { ISimilarArtist } from '@/types/responses/artist'
-import { AlbumsSearchParams, SourceFilter, SourceFilters } from '@/utils/albumsFilter'
+import {
+  AlbumsSearchParams,
+  LibraryScopeFilter,
+  LibraryScopeFilters,
+  SourceFilter,
+  SourceFilters,
+} from '@/utils/albumsFilter'
 import { SearchParamsHandler } from '@/utils/searchParamsHandler'
 
 const MemoShadowHeader = memo(ShadowHeader)
@@ -31,6 +37,7 @@ export default function ArtistsList() {
   const { getSearchParam } = new SearchParamsHandler(searchParams)
   const { getArtistAllSongs } = useSongList()
   const { setSongList } = usePlayerActions()
+  const { mode } = useMediaLibraryMode()
   const {
     artistsPageViewType,
     setArtistsPageViewType,
@@ -41,15 +48,26 @@ export default function ArtistsList() {
     AlbumsSearchParams.Source,
     SourceFilters.All,
   )
+  const libraryScope = getSearchParam<LibraryScopeFilter>(
+    AlbumsSearchParams.Scope,
+    LibraryScopeFilters.All,
+  )
+  const favoritesOnly = libraryScope === LibraryScopeFilters.Favorites
 
   const columns = artistsColumns()
 
-  const { data: artists, isLoading } = useGetArtists(sourceFilter)
+  const { data: artists, isLoading } = useGetArtists(sourceFilter, {
+    favoritesOnly,
+  })
 
   async function handlePlayArtistRadio(artist: ISimilarArtist) {
     const songList = await getArtistAllSongs(artist.id)
 
     if (songList) setSongList(songList, 0)
+  }
+
+  if (mode === 'applemusic') {
+    return <AppleMusicArtistsPlaceholder />
   }
 
   if (isLoading) return <ArtistsFallback />
@@ -96,6 +114,32 @@ export default function ArtistsList() {
           </GridViewWrapper>
         </MemoListWrapper>
       )}
+    </div>
+  )
+}
+
+function AppleMusicArtistsPlaceholder() {
+  const { t } = useTranslation()
+
+  return (
+    <div className="w-full h-full">
+      <div className="flex justify-between items-center px-8 py-4">
+        <div>
+          <h1 className="text-2xl font-bold">{t('sidebar.artists')}</h1>
+          <p className="text-muted-foreground">0 artists</p>
+        </div>
+      </div>
+
+      <div className="px-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {Array.from({ length: 12 }).map((_, index) => (
+            <div key={index} className="flex flex-col gap-2">
+              <div className="aspect-square bg-skeleton rounded-full" />
+              <div className="h-4 bg-skeleton rounded w-3/4" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

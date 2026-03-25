@@ -24,6 +24,7 @@ export {
   pickLocalLibraryDirectory,
   readLocalLibraryFile,
 } from './adapters/local-library-adapter'
+export { pickBackgroundImageFile } from './adapters/background-image-adapter'
 export { pickParametricEqFile } from './adapters/parametric-eq-adapter'
 export {
   onSpotifyConnectEvent,

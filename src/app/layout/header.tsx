@@ -1,3 +1,4 @@
+import { ModeToggle } from '@/app/components/header/mode-toggle'
 import { NavigationButtons } from '@/app/components/header/navigation-buttons'
 import { UserDropdown } from '@/app/components/header/user-dropdown'
 import { HeaderSongInfo } from '@/app/components/header-song'
@@ -18,6 +19,7 @@ export function Header() {
       </div>
       <HeaderSongInfo />
       <div className="flex justify-end items-center gap-2">
+        <ModeToggle />
         <SettingsButton />
         <UserDropdown />
         {isWindows && !isFullscreen && <div className="w-[122px]" />}

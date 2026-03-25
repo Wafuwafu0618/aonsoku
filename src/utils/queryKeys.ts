@@ -9,6 +9,7 @@ const album = {
   info: 'get-album-info',
   moreAlbums: 'get-artist-albums',
   genreAlbums: 'get-genre-random-albums',
+  genreRecommendations: 'get-home-genre-recommendations',
   recentlyAdded: 'get-recently-added-albums',
   mostPlayed: 'get-most-played-albums',
   recentlyPlayed: 'get-recently-played-albums',
@@ -57,6 +58,14 @@ const episode = {
   latest: 'get-latest-episodes',
 }
 
+const appleMusic = {
+  browse: 'apple-music-browse',
+  library: 'apple-music-library',
+  search: 'apple-music-search',
+  album: 'apple-music-album',
+  playlist: 'apple-music-playlist',
+}
+
 export const queryKeys = {
   album,
   artist,
@@ -69,4 +78,5 @@ export const queryKeys = {
   update,
   podcast,
   episode,
+  appleMusic,
 }

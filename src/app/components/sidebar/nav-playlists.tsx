@@ -10,15 +10,18 @@ import {
 } from '@/app/components/ui/main-sidebar'
 import { ScrollArea } from '@/app/components/ui/scroll-area'
 import { subsonic } from '@/service/subsonic'
+import { useMediaLibraryMode } from '@/store/app.store'
 import { queryKeys } from '@/utils/queryKeys'
 import { SidebarPlaylistItem } from './playlist-item'
 
 export function NavPlaylists() {
   const { t } = useTranslation()
+  const { mode } = useMediaLibraryMode()
 
   const { data: playlists } = useQuery({
     queryKey: [queryKeys.playlist.all],
     queryFn: subsonic.playlists.getAll,
+    enabled: mode === 'navidrome',
   })
 
   const hasPlaylists = playlists !== undefined && playlists.length > 0

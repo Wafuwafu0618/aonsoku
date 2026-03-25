@@ -17,6 +17,7 @@
     "playlists": "Playlists",
     "radios": "Radios",
     "podcasts": "Podcasts",
+    "browse": "Browse",
     "emptyPlaylist": "No playlists created yet"
   },
   "menu": {
@@ -621,6 +622,20 @@
       "privacy": "Privacy & Security"
     },
     "appearance": {
+      "background": {
+        "group": "Window Background Image",
+        "description": "Place your chosen image on the bottom layer of the app window to enhance transparent themes.",
+        "none": "No image selected",
+        "hint": "Select an image to use it behind the UI.",
+        "desktopOnly": "This feature is available on desktop builds only.",
+        "clear": "Clear",
+        "select": {
+          "label": "Background image",
+          "button": "Choose Image",
+          "loading": "Selecting...",
+          "error": "Failed to select image: {{reason}}"
+        }
+      },
       "general": {
         "group": "General",
         "description": "Customize the app's look and display behaviors.",

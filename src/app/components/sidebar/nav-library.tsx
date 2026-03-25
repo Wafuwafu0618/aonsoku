@@ -5,36 +5,25 @@ import {
   MainSidebarMenu,
   MainSidebarMenuItem,
 } from '@/app/components/ui/main-sidebar'
-import { libraryItems, SidebarItems } from '@/app/layout/sidebar'
-import { useAppStore } from '@/store/app.store'
+import { appleMusicLibraryItems, libraryItems } from '@/app/layout/sidebar'
+import { useMediaLibraryMode } from '@/store/app.store'
 import { SidebarMainItem } from './main-item'
-import { SidebarPodcastItem } from './podcast-item'
 
 export function NavLibrary() {
   const { t } = useTranslation()
-  const hideRadiosSection = useAppStore().pages.hideRadiosSection
-  const isPodcastsActive = useAppStore().podcasts.active
+  const { mode } = useMediaLibraryMode()
+
+  const items = mode === 'applemusic' ? appleMusicLibraryItems : libraryItems
 
   return (
     <MainSidebarGroup className="px-4 py-0">
       <MainSidebarGroupLabel>{t('sidebar.library')}</MainSidebarGroupLabel>
       <MainSidebarMenu>
-        {libraryItems.map((item) => {
-          // Setting to show/hide Radios/Podcasts section
-          if (hideRadiosSection && item.id === SidebarItems.Radios) return null
-          if (!isPodcastsActive && item.id === SidebarItems.Podcasts)
-            return null
-
-          if (item.id === SidebarItems.Podcasts) {
-            return <SidebarPodcastItem key={item.id} item={item} />
-          }
-
-          return (
-            <MainSidebarMenuItem key={item.id}>
-              <SidebarMainItem item={item} />
-            </MainSidebarMenuItem>
-          )
-        })}
+        {items.map((item) => (
+          <MainSidebarMenuItem key={item.id}>
+            <SidebarMainItem item={item} />
+          </MainSidebarMenuItem>
+        ))}
       </MainSidebarMenu>
     </MainSidebarGroup>
   )

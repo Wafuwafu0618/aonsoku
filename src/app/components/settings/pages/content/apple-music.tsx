@@ -1,8 +1,6 @@
 import { CheckCircle2, RefreshCw, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'react-toastify'
-import { isDesktop } from '@/platform/capabilities'
-import { appleMusicService, resolveAppleMusicErrorCode } from '@/service/apple-music'
 import {
   Content,
   ContentItem,
@@ -14,10 +12,43 @@ import {
   HeaderTitle,
   Root,
 } from '@/app/components/settings/section'
+import { Badge } from '@/app/components/ui/badge'
 import { Button } from '@/app/components/ui/button'
+import { isDesktop } from '@/platform/capabilities'
+import {
+  appleMusicService,
+  resolveAppleMusicErrorCode,
+} from '@/service/apple-music'
+import { useAppleMusicFavoriteGenres } from '@/store/app.store'
+
+// よくある音楽ジャンルのリスト
+const AVAILABLE_GENRES = [
+  'J-Pop',
+  'アニメ',
+  'ロック',
+  'ポップ',
+  'ヒップホップ',
+  'R&B',
+  'クラシック',
+  'ジャズ',
+  'エレクトロニック',
+  'K-Pop',
+  '洋楽',
+  'ボーカロイド',
+  'ゲーム音楽',
+  'サウンドトラック',
+  'メタル',
+  'フォーク',
+  'インディー',
+  'レゲエ',
+  'ブルース',
+  'ラテン',
+]
 
 export function AppleMusicContent() {
   const desktop = isDesktop()
+  const { genres: favoriteGenres, setGenres: setFavoriteGenres } =
+    useAppleMusicFavoriteGenres()
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [storefrontId, setStorefrontId] = useState('unknown')
   const [librarySummary, setLibrarySummary] = useState<{
@@ -70,10 +101,13 @@ export function AppleMusicContent() {
 
   function classifyError(error: unknown): { code: string; reason: string } {
     const reason = error instanceof Error ? error.message : String(error)
-    const serviceCode = String(resolveAppleMusicErrorCode(error)).trim().toLowerCase()
-    const code = serviceCode.length > 0 && serviceCode !== 'unknown'
-      ? serviceCode
-      : inferCodeFromMessage(reason)
+    const serviceCode = String(resolveAppleMusicErrorCode(error))
+      .trim()
+      .toLowerCase()
+    const code =
+      serviceCode.length > 0 && serviceCode !== 'unknown'
+        ? serviceCode
+        : inferCodeFromMessage(reason)
     return { code, reason }
   }
 
@@ -81,14 +115,20 @@ export function AppleMusicContent() {
     codeLike: string | undefined,
     message: string,
   ): { code: string; reason: string } {
-    const normalizedCode = String(codeLike ?? '').trim().toLowerCase()
+    const normalizedCode = String(codeLike ?? '')
+      .trim()
+      .toLowerCase()
     if (normalizedCode.length > 0) {
       return { code: normalizedCode, reason: message }
     }
     return { code: inferCodeFromMessage(message), reason: message }
   }
 
-  function showClassifiedErrorToast(scope: string, code: string, reason: string) {
+  function showClassifiedErrorToast(
+    scope: string,
+    code: string,
+    reason: string,
+  ) {
     switch (code) {
       case 'cancelled':
         toast.info(`${scope}をキャンセルしました。`)
@@ -106,7 +146,9 @@ export function AppleMusicContent() {
         toast.error(`${scope}に失敗: Apple Music セッションが未認証です。`)
         return
       case 'desktop-only':
-        toast.error(`${scope}に失敗: Desktop(Electron) 環境でのみ利用できます。`)
+        toast.error(
+          `${scope}に失敗: Desktop(Electron) 環境でのみ利用できます。`,
+        )
         return
       default:
         toast.error(`${scope}に失敗: ${reason}`)
@@ -205,8 +247,12 @@ export function AppleMusicContent() {
     try {
       const result = await window.api.appleMusicOpenSignInWindow()
       if (!result.ok) {
-        const message = result.error?.message ?? 'Apple Music サインインに失敗しました。'
-        const { code, reason } = classifyErrorFromResult(result.error?.code, message)
+        const message =
+          result.error?.message ?? 'Apple Music サインインに失敗しました。'
+        const { code, reason } = classifyErrorFromResult(
+          result.error?.code,
+          message,
+        )
         setHasOperationalIssue(true)
         setOperationStatusText(`Sign-In: 失敗 (${code})`)
         showClassifiedErrorToast('Apple Music サインイン', code, reason)
@@ -309,7 +355,8 @@ export function AppleMusicContent() {
       <Header>
         <HeaderTitle>Apple Music</HeaderTitle>
         <HeaderDescription>
-          MusicKit JS を使って Apple Music の検索・ブラウズと再生準備を行います。
+          MusicKit JS を使って Apple Music
+          の検索・ブラウズと再生準備を行います。
           再生パイプライン自体は別実装です。
         </HeaderDescription>
       </Header>
@@ -319,7 +366,8 @@ export function AppleMusicContent() {
           <ContentItemTitle>Apple Music Sign-In</ContentItemTitle>
           <ContentItemForm className="max-w-none w-3/5 justify-between gap-3">
             <span className="text-xs text-muted-foreground">
-              Apple ID でログインして、music.apple.com のセッションをアプリで利用します。サインインウィンドウは自動で閉じません。
+              Apple ID でログインして、music.apple.com
+              のセッションをアプリで利用します。サインインウィンドウは自動で閉じません。
             </span>
             <Button
               type="button"
@@ -341,13 +389,15 @@ export function AppleMusicContent() {
 
         {!desktop && (
           <p className="text-xs text-muted-foreground">
-            Apple Music のサインイン機能はデスクトップ(Electron)環境でのみ利用できます。
+            Apple Music
+            のサインイン機能はデスクトップ(Electron)環境でのみ利用できます。
           </p>
         )}
 
         <p className="text-xs text-muted-foreground">
-          このモードでは Developer Token / Music User Token の手動入力は不要です。
-          music.apple.com のログインセッションをそのまま利用します。
+          このモードでは Developer Token / Music User Token
+          の手動入力は不要です。 music.apple.com
+          のログインセッションをそのまま利用します。
         </p>
         <p className="text-xs text-muted-foreground">
           進行状態: {operationStatusText}
@@ -424,7 +474,8 @@ export function AppleMusicContent() {
           <ContentItemTitle>Diagnostics (On-demand)</ContentItemTitle>
           <ContentItemForm className="max-w-none w-3/5 justify-between gap-3">
             <span className="text-xs text-muted-foreground">
-              通常時は詳細ログを表示しません。問題時のみ Collect して必要なら詳細を展開してください。
+              通常時は詳細ログを表示しません。問題時のみ Collect
+              して必要なら詳細を展開してください。
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -469,7 +520,8 @@ export function AppleMusicContent() {
           </ContentItemForm>
           {hasOperationalIssue && !hasDiagnosticsData ? (
             <p className="mt-3 w-3/5 text-[11px] text-muted-foreground">
-              問題を検知しました。必要に応じて `Collect Debug Log` を実行してください。
+              問題を検知しました。必要に応じて `Collect Debug Log`
+              を実行してください。
             </p>
           ) : null}
           {isDiagnosticsExpanded && diagnosticsText ? (
@@ -477,6 +529,49 @@ export function AppleMusicContent() {
               {diagnosticsText}
             </pre>
           ) : null}
+        </ContentItem>
+
+        <ContentSeparator />
+
+        <ContentItem>
+          <ContentItemTitle>Favorite Genres</ContentItemTitle>
+          <ContentItemForm>
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                Select your favorite music genres for personalized
+                recommendations.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABLE_GENRES.map((genre) => {
+                  const isSelected = favoriteGenres.includes(genre)
+                  return (
+                    <Badge
+                      key={genre}
+                      variant={isSelected ? 'default' : 'outline'}
+                      className="cursor-pointer px-3 py-1 text-sm"
+                      onClick={() => {
+                        if (isSelected) {
+                          setFavoriteGenres(
+                            favoriteGenres.filter((g) => g !== genre),
+                          )
+                        } else {
+                          setFavoriteGenres([...favoriteGenres, genre])
+                        }
+                      }}
+                    >
+                      {isSelected && '✓ '}
+                      {genre}
+                    </Badge>
+                  )
+                })}
+              </div>
+              {favoriteGenres.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Selected: {favoriteGenres.join(', ')}
+                </p>
+              )}
+            </div>
+          </ContentItemForm>
         </ContentItem>
       </Content>
     </Root>
