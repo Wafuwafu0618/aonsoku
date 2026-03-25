@@ -64,6 +64,15 @@ export enum IpcChannels {
   SpotifyConnectEvent = 'spotify-connect-event',
   AppleMusicResolve = 'apple-music-resolve',
   AppleMusicSetWrapperConfig = 'apple-music-set-wrapper-config',
+  AppleMusicWrapperBuildImage = 'apple-music-wrapper-build-image',
+  AppleMusicWrapperStartService = 'apple-music-wrapper-start-service',
+  AppleMusicWrapperStopService = 'apple-music-wrapper-stop-service',
+  AppleMusicWrapperStartLogin = 'apple-music-wrapper-start-login',
+  AppleMusicWrapperStopLogin = 'apple-music-wrapper-stop-login',
+  AppleMusicWrapperSubmitTwoFactorCode = 'apple-music-wrapper-submit-two-factor-code',
+  AppleMusicWrapperGetStatus = 'apple-music-wrapper-get-status',
+  AppleMusicWrapperGetLogs = 'apple-music-wrapper-get-logs',
+  AppleMusicWrapperGetMusicTokenPreview = 'apple-music-wrapper-get-music-token-preview',
   AppleMusicGetLastRequestDebug = 'apple-music-get-last-request-debug',
   AppleMusicGetDebugReport = 'apple-music-get-debug-report',
   AppleMusicOpenSignInWindow = 'apple-music-open-sign-in-window',
@@ -338,6 +347,40 @@ export interface AppleMusicWrapperConfig {
   accountPort: number
 }
 
+export interface AppleMusicWrapperCommandResult {
+  ok: boolean
+  message: string
+  stderr?: string
+}
+
+export interface AppleMusicWrapperContainerState {
+  state: 'missing' | 'running' | 'stopped'
+  statusText: string
+}
+
+export interface AppleMusicWrapperRuntimeStatus {
+  dockerAvailable: boolean
+  wrapperDirPath: string | null
+  dataDirPath: string | null
+  musicTokenPath: string | null
+  imageExists: boolean
+  service: AppleMusicWrapperContainerState
+  login: AppleMusicWrapperContainerState
+  accountReachable: boolean
+  hasMusicToken: boolean
+}
+
+export interface AppleMusicWrapperLogsResult {
+  ok: boolean
+  message: string
+  logs: string
+}
+
+export interface AppleMusicWrapperStartLoginRequest {
+  username: string
+  password: string
+}
+
 export interface AppleMusicRequestDebug {
   requestId: number
   url: string
@@ -459,6 +502,21 @@ export interface IAonsokuAPI {
   removeSpotifyConnectEventListener: () => void
   appleMusicResolve: (adamId: string) => Promise<AppleMusicResolveResult>
   appleMusicSetWrapperConfig: (config: AppleMusicWrapperConfig) => Promise<void>
+  appleMusicWrapperBuildImage: () => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperStartService: () => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperStopService: () => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperStartLogin: (
+    payload: AppleMusicWrapperStartLoginRequest,
+  ) => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperStopLogin: () => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperSubmitTwoFactorCode: (
+    code: string,
+  ) => Promise<AppleMusicWrapperCommandResult>
+  appleMusicWrapperGetStatus: () => Promise<AppleMusicWrapperRuntimeStatus>
+  appleMusicWrapperGetLogs: (
+    target?: 'service' | 'login',
+  ) => Promise<AppleMusicWrapperLogsResult>
+  appleMusicWrapperGetMusicTokenPreview: () => Promise<string>
   appleMusicGetLastRequestDebug: () => Promise<AppleMusicRequestDebug | null>
   appleMusicGetDebugReport: () => Promise<string>
   appleMusicOpenSignInWindow: () => Promise<AppleMusicOpenSignInResult>

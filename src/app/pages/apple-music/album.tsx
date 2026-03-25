@@ -3,6 +3,10 @@ import { Play } from 'lucide-react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Button } from '@/app/components/ui/button'
 import { useGetCatalogAlbum } from '@/app/hooks/use-apple-music'
+import {
+  mapAppleMusicSongToAppSong,
+  mapAppleMusicSongsToAppSongs,
+} from '@/domain/mappers/apple-music'
 import { ROUTES } from '@/routes/routesList'
 import { appleMusicService } from '@/service/apple-music'
 import { usePlayerActions } from '@/store/player.store'
@@ -22,18 +26,12 @@ export default function AppleMusicAlbumPage() {
   const { setSongList } = usePlayerActions()
   const queryClient = useQueryClient()
 
-  console.log('[AppleMusicAlbumPage] albumId:', albumId)
-  console.log('[AppleMusicAlbumPage] genre from URL:', genre)
-
   // まずカタログAPIを試す
   const {
     data: catalogAlbum,
     isLoading: isCatalogLoading,
     error: catalogError,
   } = useGetCatalogAlbum(albumId || '', !!albumId)
-
-  console.log('[AppleMusicAlbumPage] catalogAlbum:', catalogAlbum)
-  console.log('[AppleMusicAlbumPage] catalogError:', catalogError)
 
   function isMatchedAlbum(candidate: AppleMusicAlbum | undefined): boolean {
     if (!candidate || !albumId) return false
@@ -46,13 +44,9 @@ export default function AppleMusicAlbumPage() {
   if (!catalogAlbum) {
     const cacheKey = [queryKeys.appleMusic.search, genre, ['songs', 'albums']]
     if (genre) {
-      console.log('[AppleMusicAlbumPage] Looking for cache with key:', cacheKey)
-
       const cachedSearchData = queryClient.getQueryData<AppleMusicSearchResult>(
         cacheKey,
       )
-
-      console.log('[AppleMusicAlbumPage] cachedSearchData:', cachedSearchData)
 
       cachedAlbum = cachedSearchData?.albums?.find((a) => isMatchedAlbum(a))
     }
@@ -102,12 +96,6 @@ export default function AppleMusicAlbumPage() {
       }
     }
 
-    console.log('[AppleMusicAlbumPage] cachedAlbum:', cachedAlbum)
-    console.log('[AppleMusicAlbumPage] cachedAlbum.songs:', cachedAlbum?.songs)
-    console.log(
-      '[AppleMusicAlbumPage] cachedAlbum.songs length:',
-      cachedAlbum?.songs?.length,
-    )
   }
 
   // 最終的に表示するアルバム
@@ -120,22 +108,18 @@ export default function AppleMusicAlbumPage() {
     // カタログAPIが成功し、曲リストもある
     album = catalogAlbum
     albumSource = 'catalog-with-songs'
-    console.log('[AppleMusicAlbumPage] Using catalog album with songs')
   } else if (cachedAlbum && cachedAlbum.songs && cachedAlbum.songs.length > 0) {
     // キャッシュに曲リストがある
     album = cachedAlbum
     albumSource = 'cached-with-songs'
-    console.log('[AppleMusicAlbumPage] Using cached album with songs')
   } else if (catalogAlbum) {
     // カタログAPIは成功したが曲リストがない
     album = catalogAlbum
     albumSource = 'catalog'
-    console.log('[AppleMusicAlbumPage] Using catalog album without songs')
   } else if (cachedAlbum) {
     // キャッシュのみ利用可能
     album = cachedAlbum
     albumSource = 'cached'
-    console.log('[AppleMusicAlbumPage] Using cached album without songs')
   }
 
   // どちらも見つからない場合はエラー
@@ -269,7 +253,7 @@ export default function AppleMusicAlbumPage() {
             className="w-fit"
             onClick={() => {
               if (songs.length > 0) {
-                setSongList(songs as any, 0)
+                setSongList(mapAppleMusicSongsToAppSongs(songs), 0)
               }
             }}
             disabled={songs.length === 0}
@@ -287,7 +271,9 @@ export default function AppleMusicAlbumPage() {
             <div
               key={song.id}
               className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 cursor-pointer group"
-              onClick={() => setSongList(songs as any, index)}
+              onClick={() =>
+                setSongList(mapAppleMusicSongsToAppSongs(songs), index)
+              }
             >
               <span className="w-8 text-center text-muted-foreground">
                 {index + 1}
@@ -310,7 +296,7 @@ export default function AppleMusicAlbumPage() {
                 className="opacity-0 group-hover:opacity-100"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setSongList([song as any], 0)
+                  setSongList([mapAppleMusicSongToAppSong(song)], 0)
                 }}
               >
                 <Play className="w-4 h-4" />

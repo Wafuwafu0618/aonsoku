@@ -5,8 +5,10 @@ interface PlayerUiActions {
   setMainDrawerState: (value: boolean) => void
   setQueueState: (value: boolean) => void
   setLyricsState: (value: boolean) => void
+  setLyricsSidebarState: (value: boolean) => void
   toggleQueueAction: () => void
   toggleLyricsAction: () => void
+  toggleLyricsSidebarAction: () => void
   toggleQueueAndLyrics: () => void
   closeDrawer: () => void
   setIsFullscreen: (value: boolean) => void
@@ -17,6 +19,7 @@ interface PlayerUiState {
   mainDrawerState: boolean
   queueState: boolean
   lyricsState: boolean
+  lyricsSidebarState: boolean
   isFullscreen: boolean
   actions: PlayerUiActions
 }
@@ -26,6 +29,7 @@ export const usePlayerUiStore = createWithEqualityFn<PlayerUiState>()(
     mainDrawerState: false,
     queueState: false,
     lyricsState: false,
+    lyricsSidebarState: false,
     isFullscreen: false,
     actions: {
       setMainDrawerState: (value) => {
@@ -36,6 +40,14 @@ export const usePlayerUiStore = createWithEqualityFn<PlayerUiState>()(
       },
       setLyricsState: (value) => {
         set({ lyricsState: value })
+      },
+      setLyricsSidebarState: (value) => {
+        set({
+          lyricsSidebarState: value,
+          mainDrawerState: value ? false : get().mainDrawerState,
+          queueState: value ? false : get().queueState,
+          lyricsState: value ? false : get().lyricsState,
+        })
       },
       toggleQueueAction: () => {
         const { mainDrawerState, lyricsState, queueState, actions } = get()
@@ -48,6 +60,7 @@ export const usePlayerUiStore = createWithEqualityFn<PlayerUiState>()(
         set({
           queueState: !queueState,
           mainDrawerState: !mainDrawerState,
+          lyricsSidebarState: false,
         })
       },
       toggleLyricsAction: () => {
@@ -61,6 +74,16 @@ export const usePlayerUiStore = createWithEqualityFn<PlayerUiState>()(
         set({
           lyricsState: !lyricsState,
           mainDrawerState: !mainDrawerState,
+        })
+      },
+      toggleLyricsSidebarAction: () => {
+        const { lyricsSidebarState } = get()
+
+        set({
+          lyricsSidebarState: !lyricsSidebarState,
+          mainDrawerState: false,
+          queueState: false,
+          lyricsState: false,
         })
       },
       toggleQueueAndLyrics: () => {

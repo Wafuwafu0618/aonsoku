@@ -101,7 +101,7 @@ export const appleMusicMainNavItems = [
   {
     id: SidebarItems.Library,
     title: 'sidebar.library',
-    route: ROUTES.LIBRARY.FAVORITES,
+    route: ROUTES.LIBRARY.PLAYLISTS,
     icon: Library,
   },
 ]
@@ -141,27 +141,21 @@ export const libraryItems = [
 
 export const appleMusicLibraryItems = [
   {
-    id: SidebarItems.RecentlyAdded,
-    title: 'home.recentlyAdded',
-    route: `${ROUTES.ALBUMS.RECENTLY_ADDED}&scope=favorites`,
-    icon: Clock3,
-  },
-  {
-    id: SidebarItems.Artists,
-    title: 'sidebar.artists',
-    route: `${ROUTES.LIBRARY.ARTISTS}?scope=favorites`,
-    icon: Mic2,
+    id: SidebarItems.Browse,
+    title: 'sidebar.browse',
+    route: ROUTES.LIBRARY.APPLE_MUSIC,
+    icon: Compass,
   },
   {
     id: SidebarItems.Songs,
     title: 'sidebar.songs',
-    route: `${ROUTES.LIBRARY.SONGS}?scope=favorites`,
+    route: ROUTES.LIBRARY.SONGS,
     icon: Music2,
   },
   {
     id: SidebarItems.Albums,
     title: 'sidebar.albums',
-    route: `${ROUTES.ALBUMS.GENERIC('alphabeticalByName')}&scope=favorites`,
+    route: ROUTES.LIBRARY.ALBUMS,
     icon: Library,
   },
   {

@@ -21,6 +21,7 @@ import { logger } from '@/utils/logger'
 
 const LOG_TAG = '[AppleMusicBackend]'
 const APPLE_MUSIC_URI_PREFIX = 'apple-music://'
+const RECOVERABLE_NATIVE_LOAD_ERROR_CODES = new Set(['not-initialized'])
 
 const capabilities: PlaybackBackendCapabilities = {
   canSeek: true,
@@ -274,7 +275,7 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       // Step 4: Initialize native audio sidecar and load the decrypted temp file
       await this.ensureInitialized()
 
-      const loadResult = await api.nativeAudioLoad({
+      const loadPayload = {
         src: resolveResult.tempFilePath,
         autoplay: request.autoplay,
         loop: request.loop,
@@ -284,7 +285,23 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
         targetSampleRateHz: request.targetSampleRateHz,
         oversamplingFilterId: request.oversamplingFilterId,
         parametricEq: request.parametricEq,
-      })
+      }
+      let loadResult = await api.nativeAudioLoad(loadPayload)
+
+      if (
+        !loadResult.ok &&
+        loadResult.error?.code &&
+        RECOVERABLE_NATIVE_LOAD_ERROR_CODES.has(loadResult.error.code)
+      ) {
+        logger.warn(
+          LOG_TAG,
+          'Native sidecar reported not-initialized during load. Re-initializing and retrying once.',
+          { code: loadResult.error.code, message: loadResult.error.message },
+        )
+        this.initialized = false
+        await this.ensureInitialized()
+        loadResult = await api.nativeAudioLoad(loadPayload)
+      }
 
       if (!loadResult.ok) {
         throw {

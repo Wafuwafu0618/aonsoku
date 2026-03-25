@@ -2,7 +2,11 @@ import { Play } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/app/components/ui/button'
-import { resolveAppleMusicAlbumDetailId } from '@/domain/mappers/apple-music'
+import {
+  mapAppleMusicSongToAppSong,
+  mapAppleMusicSongsToAppSongs,
+  resolveAppleMusicAlbumDetailId,
+} from '@/domain/mappers/apple-music'
 import { useSearchAppleMusic } from '@/app/hooks/use-apple-music'
 import { ROUTES } from '@/routes/routesList'
 import { useAppleMusicFavoriteGenres } from '@/store/app.store'
@@ -277,7 +281,7 @@ export function AppleMusicGenreRecommendations({
   if (genresToShow.length === 0) return null
 
   const handlePlaySong = (song: AppleMusicSong) => {
-    setSongList([song as any], 0)
+    setSongList([mapAppleMusicSongToAppSong(song)], 0)
   }
 
   return (
@@ -380,14 +384,14 @@ export function AppleMusicPersonalMixes({
         const shuffled = artistSongs
           .sort(() => Math.random() - 0.5)
           .slice(0, 50)
-        setSongList(shuffled as any, 0)
+        setSongList(mapAppleMusicSongsToAppSongs(shuffled), 0)
       } else {
         // 検索結果がない場合はライブラリから
         const librarySongs = songs.filter(
           (song) => normalize(song.artistName) === normalize(artist.name),
         )
         if (librarySongs.length > 0) {
-          setSongList(librarySongs as any, 0)
+          setSongList(mapAppleMusicSongsToAppSongs(librarySongs), 0)
         }
       }
     } catch {
@@ -396,7 +400,7 @@ export function AppleMusicPersonalMixes({
         (song) => normalize(song.artistName) === normalize(artist.name),
       )
       if (librarySongs.length > 0) {
-        setSongList(librarySongs as any, 0)
+        setSongList(mapAppleMusicSongsToAppSongs(librarySongs), 0)
       }
     }
   }

@@ -1,7 +1,11 @@
 import { Play } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/app/components/ui/button'
-import { resolveAppleMusicAlbumDetailId } from '@/domain/mappers/apple-music'
+import {
+  mapAppleMusicSongToAppSong,
+  mapAppleMusicSongsToAppSongs,
+  resolveAppleMusicAlbumDetailId,
+} from '@/domain/mappers/apple-music'
 import { ROUTES } from '@/routes/routesList'
 import { usePlayerActions } from '@/store/player.store'
 import {
@@ -61,7 +65,7 @@ export function AppleMusicNewReleases({ albums }: AppleMusicNewReleasesProps) {
               className="absolute right-3 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full border-white/25 bg-background/55 opacity-100 backdrop-blur-sm sm:opacity-0 sm:group-hover:opacity-100"
               onClick={() => {
                 if (album.songs?.length > 0) {
-                  setSongList(album.songs as any, 0)
+                  setSongList(mapAppleMusicSongsToAppSongs(album.songs), 0)
                 }
               }}
               aria-label={`Play ${album.name}`}
@@ -98,7 +102,7 @@ export function AppleMusicTopCharts({
             title: song.title,
             subtitle: song.artistName,
             imageUrl: song.artworkUrl,
-            onPlay: () => setSongList([song as any], 0),
+            onPlay: () => setSongList([mapAppleMusicSongToAppSong(song)], 0),
           }))}
         />
       )}
@@ -115,7 +119,7 @@ export function AppleMusicTopCharts({
               resolveAppleMusicAlbumDetailId(album),
             ),
             onPlay: album.songs?.length
-              ? () => setSongList(album.songs as any, 0)
+              ? () => setSongList(mapAppleMusicSongsToAppSongs(album.songs), 0)
               : undefined,
           }))}
         />
@@ -131,7 +135,8 @@ export function AppleMusicTopCharts({
             imageUrl: playlist.artworkUrl,
             link: ROUTES.PLAYLIST.PAGE(playlist.id),
             onPlay: playlist.songs?.length
-              ? () => setSongList(playlist.songs as any, 0)
+              ? () =>
+                setSongList(mapAppleMusicSongsToAppSongs(playlist.songs), 0)
               : undefined,
           }))}
         />
@@ -266,7 +271,9 @@ export function AppleMusicRecentlyAdded({
                   size="icon"
                   variant="outline"
                   className="absolute bottom-2 right-2 z-10 h-10 w-10 rounded-full border-white/25 bg-background/80 opacity-0 backdrop-blur-sm group-hover:opacity-100 transition-opacity"
-                  onClick={() => setSongList(album.songs as any, 0)}
+                  onClick={() =>
+                    setSongList(mapAppleMusicSongsToAppSongs(album.songs), 0)
+                  }
                   aria-label={`Play ${album.name}`}
                 >
                   <Play className="h-5 w-5 fill-current" />
@@ -327,7 +334,9 @@ export function AppleMusicBrowsePlaylists({
                   size="icon"
                   variant="outline"
                   className="absolute bottom-2 right-2 h-10 w-10 rounded-full border-white/25 bg-background/80 opacity-0 backdrop-blur-sm group-hover:opacity-100 transition-opacity"
-                  onClick={() => setSongList(playlist.songs as any, 0)}
+                  onClick={() =>
+                    setSongList(mapAppleMusicSongsToAppSongs(playlist.songs), 0)
+                  }
                   aria-label={`Play ${playlist.name}`}
                 >
                   <Play className="h-5 w-5 fill-current" />

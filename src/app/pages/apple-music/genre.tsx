@@ -1,7 +1,11 @@
 import { Play } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { Button } from '@/app/components/ui/button'
-import { resolveAppleMusicAlbumDetailId } from '@/domain/mappers/apple-music'
+import {
+  mapAppleMusicSongToAppSong,
+  mapAppleMusicSongsToAppSongs,
+  resolveAppleMusicAlbumDetailId,
+} from '@/domain/mappers/apple-music'
 import { useSearchAppleMusic } from '@/app/hooks/use-apple-music'
 import { ROUTES } from '@/routes/routesList'
 import { usePlayerActions } from '@/store/player.store'
@@ -11,22 +15,13 @@ export default function AppleMusicGenrePage() {
   const { genre } = useParams<{ genre: string }>()
   const { setSongList } = usePlayerActions()
 
-  console.log('[AppleMusicGenrePage] genre from URL:', genre)
-
   const {
     data: searchData,
     isLoading,
-    error,
   } = useSearchAppleMusic(genre || '', ['songs', 'albums'], !!genre)
-
-  console.log('[AppleMusicGenrePage] searchData:', searchData)
-  console.log('[AppleMusicGenrePage] error:', error)
 
   const songs = searchData?.songs || []
   const albums = searchData?.albums || []
-
-  console.log('[AppleMusicGenrePage] albums count:', albums.length)
-  console.log('[AppleMusicGenrePage] first album ID:', albums[0]?.id)
 
   if (isLoading) {
     return (
@@ -98,7 +93,12 @@ export default function AppleMusicGenrePage() {
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      setSongList((item as AppleMusicAlbum).songs as any, 0)
+                      setSongList(
+                        mapAppleMusicSongsToAppSongs(
+                          (item as AppleMusicAlbum).songs,
+                        ),
+                        0,
+                      )
                     }}
                     aria-label={`Play ${title}`}
                   >
@@ -113,7 +113,10 @@ export default function AppleMusicGenrePage() {
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      setSongList([item as any], 0)
+                      setSongList(
+                        [mapAppleMusicSongToAppSong(item as AppleMusicSong)],
+                        0,
+                      )
                     }}
                     aria-label={`Play ${title}`}
                   >

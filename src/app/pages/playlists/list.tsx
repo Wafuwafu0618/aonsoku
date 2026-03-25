@@ -11,6 +11,7 @@ import { EmptyPlaylistsPage } from '@/app/components/playlist/empty-page'
 import { Button } from '@/app/components/ui/button'
 import { DataTable } from '@/app/components/ui/data-table'
 import { useGetAppleMusicLibraryPage } from '@/app/hooks/use-apple-music'
+import { mapAppleMusicSongsToAppSongs } from '@/domain/mappers/apple-music'
 import { playlistsColumns } from '@/app/tables/playlists-columns'
 import { subsonic } from '@/service/subsonic'
 import { useMediaLibraryMode } from '@/store/app.store'
@@ -107,15 +108,7 @@ function AppleMusicPlaylistsList() {
 
   function handlePlayPlaylist(playlist: AppleMusicPlaylist) {
     if (playlist.songs && playlist.songs.length > 0) {
-      const mappedSongs = playlist.songs.map((song: any) => ({
-        id: song.id,
-        title: song.title,
-        artist: song.artistName,
-        album: song.albumName,
-        duration: Math.floor(song.durationMs / 1000),
-        coverArt: song.artworkUrl || '',
-        path: `apple-music://${song.adamId || song.id}`,
-      }))
+      const mappedSongs = mapAppleMusicSongsToAppSongs(playlist.songs)
       setSongList(mappedSongs, 0)
     }
   }

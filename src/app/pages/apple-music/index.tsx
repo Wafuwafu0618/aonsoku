@@ -2,6 +2,7 @@ import { Loader2, Music2, Play, Search } from 'lucide-react'
 import { FormEvent, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import {
+  mapAppleMusicSongToAppSong,
   mapAppleMusicSongToMediaTrack,
   resolveAppleMusicAlbumDetailId,
   resolveAppleMusicArtworkUrl,
@@ -19,7 +20,6 @@ import {
   AppleMusicSong,
 } from '@/types/responses/apple-music'
 import { usePlayerActions } from '@/store/player.store'
-import { ISong } from '@/types/responses/song'
 
 const EMPTY_LIBRARY_RESULT: AppleMusicLibraryResult = {
   songs: [],
@@ -51,48 +51,6 @@ function appendUniqueById<T extends { id: string }>(current: T[], next: T[]): T[
 
 function keepPreviousWhenEmpty<T>(current: T[], next: T[]): T[] {
   return next.length > 0 ? next : current
-}
-
-function toPlayerSong(song: AppleMusicSong): ISong {
-  const adamId = song.adamId.trim()
-  const songId = adamId.length > 0 ? adamId : song.id
-  const year = Number.parseInt(new Date().getFullYear().toString(), 10)
-
-  return {
-    id: `apple-music:${songId}`,
-    parent: '',
-    isDir: false,
-    title: song.title,
-    album: song.albumName,
-    artist: song.artistName,
-    track: song.trackNumber ?? 0,
-    year: Number.isFinite(year) ? year : 0,
-    genre: song.genreNames[0],
-    coverArt: '',
-    size: 0,
-    contentType: 'audio/aac',
-    suffix: 'm4a',
-    duration: Math.max(0, Math.floor(song.durationMs / 1000)),
-    bitRate: 256,
-    path: `apple-music://${songId}`,
-    discNumber: song.discNumber ?? 0,
-    created: new Date().toISOString(),
-    albumId: `apple-music-album:${song.albumName}`,
-    type: 'music',
-    isVideo: false,
-    bpm: 0,
-    comment: '',
-    sortName: song.title,
-    mediaType: 'music',
-    musicBrainzId: '',
-    genres: song.genreNames.map((name) => ({ name })),
-    replayGain: {
-      trackGain: 0,
-      trackPeak: 1,
-      albumGain: 0,
-      albumPeak: 1,
-    },
-  }
 }
 
 function resolveArtwork(url: string): string {
@@ -347,7 +305,7 @@ export default function AppleMusicPage() {
   function handlePlay(song: AppleMusicSong) {
     const track = mapAppleMusicSongToMediaTrack(song)
     setSelectedTrack(track)
-    setSongList([toPlayerSong(song)], 0)
+    setSongList([mapAppleMusicSongToAppSong(song)], 0)
   }
 
   return (

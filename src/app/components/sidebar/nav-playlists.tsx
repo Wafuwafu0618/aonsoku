@@ -17,12 +17,15 @@ import { SidebarPlaylistItem } from './playlist-item'
 export function NavPlaylists() {
   const { t } = useTranslation()
   const { mode } = useMediaLibraryMode()
-
   const { data: playlists } = useQuery({
     queryKey: [queryKeys.playlist.all],
     queryFn: subsonic.playlists.getAll,
     enabled: mode === 'navidrome',
   })
+
+  if (mode === 'applemusic') {
+    return null
+  }
 
   const hasPlaylists = playlists !== undefined && playlists.length > 0
 

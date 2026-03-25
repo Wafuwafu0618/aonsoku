@@ -14,6 +14,7 @@ import {
 import {
   AppleMusicRequestDebug,
   AppleMusicWrapperConfig,
+  AppleMusicWrapperStartLoginRequest,
   IpcChannels,
   LocalLibraryFileEntry,
   OverlayColors,
@@ -49,6 +50,17 @@ import {
   invokeAppleMusicApi,
   openAppleMusicSignInWindow,
 } from './apple-music-browser-api'
+import {
+  buildAppleMusicWrapperImage,
+  getAppleMusicWrapperLogs,
+  getAppleMusicWrapperMusicTokenPreview,
+  getAppleMusicWrapperRuntimeStatus,
+  startAppleMusicWrapperLogin,
+  startAppleMusicWrapperService,
+  stopAppleMusicWrapperLogin,
+  stopAppleMusicWrapperService,
+  submitAppleMusicWrapperTwoFactorCode,
+} from './apple-music-wrapper-runtime'
 import { setWrapperConfig } from './wrapper-client'
 
 const MUSIC_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.alac'])
@@ -660,6 +672,54 @@ export function setupIpcEvents(window: BrowserWindow | null) {
     (_, config: AppleMusicWrapperConfig) => {
       setWrapperConfig(config)
     },
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperBuildImage)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperBuildImage, () =>
+    buildAppleMusicWrapperImage(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperStartService)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperStartService, () =>
+    startAppleMusicWrapperService(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperStopService)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperStopService, () =>
+    stopAppleMusicWrapperService(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperStartLogin)
+  ipcMain.handle(
+    IpcChannels.AppleMusicWrapperStartLogin,
+    (_, payload: AppleMusicWrapperStartLoginRequest) =>
+      startAppleMusicWrapperLogin(payload),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperStopLogin)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperStopLogin, () =>
+    stopAppleMusicWrapperLogin(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperSubmitTwoFactorCode)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperSubmitTwoFactorCode, (_, code: string) =>
+    submitAppleMusicWrapperTwoFactorCode(code),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperGetStatus)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperGetStatus, () =>
+    getAppleMusicWrapperRuntimeStatus(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperGetLogs)
+  ipcMain.handle(
+    IpcChannels.AppleMusicWrapperGetLogs,
+    (_, target?: 'service' | 'login') => getAppleMusicWrapperLogs(target),
+  )
+
+  ipcMain.removeHandler(IpcChannels.AppleMusicWrapperGetMusicTokenPreview)
+  ipcMain.handle(IpcChannels.AppleMusicWrapperGetMusicTokenPreview, () =>
+    getAppleMusicWrapperMusicTokenPreview(),
   )
 
   ipcMain.removeHandler(IpcChannels.AppleMusicGetLastRequestDebug)

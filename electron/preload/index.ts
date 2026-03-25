@@ -2,6 +2,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   AppleMusicWrapperConfig,
+  AppleMusicWrapperStartLoginRequest,
   IAonsokuAPI,
   IpcChannels,
   NativeAudioEvent,
@@ -156,6 +157,24 @@ const api: IAonsokuAPI = {
     ipcRenderer.invoke(IpcChannels.AppleMusicResolve, adamId),
   appleMusicSetWrapperConfig: (config: AppleMusicWrapperConfig) =>
     ipcRenderer.invoke(IpcChannels.AppleMusicSetWrapperConfig, config),
+  appleMusicWrapperBuildImage: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperBuildImage),
+  appleMusicWrapperStartService: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperStartService),
+  appleMusicWrapperStopService: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperStopService),
+  appleMusicWrapperStartLogin: (payload: AppleMusicWrapperStartLoginRequest) =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperStartLogin, payload),
+  appleMusicWrapperStopLogin: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperStopLogin),
+  appleMusicWrapperSubmitTwoFactorCode: (code: string) =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperSubmitTwoFactorCode, code),
+  appleMusicWrapperGetStatus: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperGetStatus),
+  appleMusicWrapperGetLogs: (target?: 'service' | 'login') =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperGetLogs, target),
+  appleMusicWrapperGetMusicTokenPreview: () =>
+    ipcRenderer.invoke(IpcChannels.AppleMusicWrapperGetMusicTokenPreview),
   appleMusicGetLastRequestDebug: () =>
     ipcRenderer.invoke(IpcChannels.AppleMusicGetLastRequestDebug),
   appleMusicGetDebugReport: () =>

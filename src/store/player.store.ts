@@ -1183,6 +1183,13 @@ export const useLyricsState = () =>
     toggleLyricsAction: state.actions.toggleLyricsAction,
   }))
 
+export const useLyricsSidebarState = () =>
+  usePlayerUiStore((state) => ({
+    lyricsSidebarState: state.lyricsSidebarState,
+    setLyricsSidebarState: state.actions.setLyricsSidebarState,
+    toggleLyricsSidebarAction: state.actions.toggleLyricsSidebarAction,
+  }))
+
 export const useSongColor = () =>
   usePlayerStore((state) => {
     const { currentSongColor, currentSongColorIntensity, queue } =

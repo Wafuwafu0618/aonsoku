@@ -1,5 +1,5 @@
 import { CheckCircle2, RefreshCw, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import {
   Content,
@@ -14,6 +14,7 @@ import {
 } from '@/app/components/settings/section'
 import { Badge } from '@/app/components/ui/badge'
 import { Button } from '@/app/components/ui/button'
+import { Input } from '@/app/components/ui/input'
 import { isDesktop } from '@/platform/capabilities'
 import {
   appleMusicService,
@@ -45,6 +46,10 @@ const AVAILABLE_GENRES = [
   'ラテン',
 ]
 
+type WrapperStatus = Awaited<
+  ReturnType<typeof window.api.appleMusicWrapperGetStatus>
+>
+
 export function AppleMusicContent() {
   const desktop = isDesktop()
   const { genres: favoriteGenres, setGenres: setFavoriteGenres } =
@@ -65,6 +70,31 @@ export function AppleMusicContent() {
   const [isDiagnosticsExpanded, setIsDiagnosticsExpanded] = useState(false)
   const [lastRequestDebugText, setLastRequestDebugText] = useState('')
   const [debugReportText, setDebugReportText] = useState('')
+  const [wrapperStatus, setWrapperStatus] = useState<WrapperStatus | null>(null)
+  const [wrapperStatusText, setWrapperStatusText] = useState('未確認')
+  const [wrapperUsername, setWrapperUsername] = useState('')
+  const [wrapperPassword, setWrapperPassword] = useState('')
+  const [wrapperTwoFactorCode, setWrapperTwoFactorCode] = useState('')
+  const [wrapperLogsText, setWrapperLogsText] = useState('')
+  const [wrapperMusicTokenPreview, setWrapperMusicTokenPreview] = useState('')
+  const [isRefreshingWrapperStatus, setIsRefreshingWrapperStatus] =
+    useState(false)
+  const [isWrapperBuilding, setIsWrapperBuilding] = useState(false)
+  const [isWrapperServiceStarting, setIsWrapperServiceStarting] =
+    useState(false)
+  const [isWrapperServiceStopping, setIsWrapperServiceStopping] =
+    useState(false)
+  const [isWrapperLoginStarting, setIsWrapperLoginStarting] = useState(false)
+  const [isWrapperLoginStopping, setIsWrapperLoginStopping] = useState(false)
+  const [isWrapperCodeSubmitting, setIsWrapperCodeSubmitting] = useState(false)
+  const [isWrapperLogsLoading, setIsWrapperLogsLoading] = useState(false)
+  const isWrapperServiceRunning = wrapperStatus?.service.state === 'running'
+  const isWrapperLoginRunning = wrapperStatus?.login.state === 'running'
+  const wrapperReadyForPlayback =
+    wrapperStatus?.imageExists &&
+    wrapperStatus?.hasMusicToken &&
+    wrapperStatus?.accountReachable &&
+    isWrapperServiceRunning
   const hasDiagnosticsData =
     lastRequestDebugText.trim().length > 0 || debugReportText.trim().length > 0
   const diagnosticsText = [
@@ -350,6 +380,183 @@ export function AppleMusicContent() {
     }
   }
 
+  async function refreshWrapperStatus(options?: { silent?: boolean }) {
+    if (!desktop) return
+
+    if (!options?.silent) {
+      setIsRefreshingWrapperStatus(true)
+      setWrapperStatusText('Wrapper Status: 取得中...')
+    }
+
+    try {
+      const [nextStatus, tokenPreview] = await Promise.all([
+        window.api.appleMusicWrapperGetStatus(),
+        window.api.appleMusicWrapperGetMusicTokenPreview(),
+      ])
+      setWrapperStatus(nextStatus)
+      setWrapperMusicTokenPreview(tokenPreview)
+      setWrapperStatusText(
+        `Wrapper Status: docker=${nextStatus.dockerAvailable ? 'ok' : 'ng'} service=${nextStatus.service.state} login=${nextStatus.login.state} reachable=${nextStatus.accountReachable ? 'yes' : 'no'}`,
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      setWrapperStatusText(`Wrapper Status: 失敗 (${reason})`)
+      if (!options?.silent) {
+        toast.error(`Wrapper状態取得に失敗: ${reason}`)
+      }
+    } finally {
+      if (!options?.silent) {
+        setIsRefreshingWrapperStatus(false)
+      }
+    }
+  }
+
+  async function handleWrapperBuildImage() {
+    setIsWrapperBuilding(true)
+    try {
+      const result = await window.api.appleMusicWrapperBuildImage()
+      if (!result.ok) {
+        toast.error(`Wrapperイメージ作成に失敗: ${result.message}`)
+      } else {
+        toast.success('Wrapperイメージを作成しました。')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapperイメージ作成に失敗: ${reason}`)
+    } finally {
+      setIsWrapperBuilding(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleWrapperStartService() {
+    setIsWrapperServiceStarting(true)
+    try {
+      const result = await window.api.appleMusicWrapperStartService()
+      if (!result.ok) {
+        toast.error(`Wrapper起動に失敗: ${result.message}`)
+      } else {
+        toast.success('Wrapperサービスを起動しました。')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapper起動に失敗: ${reason}`)
+    } finally {
+      setIsWrapperServiceStarting(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleWrapperStopService() {
+    setIsWrapperServiceStopping(true)
+    try {
+      const result = await window.api.appleMusicWrapperStopService()
+      if (!result.ok) {
+        toast.error(`Wrapper停止に失敗: ${result.message}`)
+      } else {
+        toast.success('Wrapperサービスを停止しました。')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapper停止に失敗: ${reason}`)
+    } finally {
+      setIsWrapperServiceStopping(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleWrapperStartLogin() {
+    if (!wrapperUsername.trim() || !wrapperPassword) {
+      toast.error('Apple IDとパスワードを入力してください。')
+      return
+    }
+
+    setIsWrapperLoginStarting(true)
+    try {
+      const result = await window.api.appleMusicWrapperStartLogin({
+        username: wrapperUsername.trim(),
+        password: wrapperPassword,
+      })
+      if (!result.ok) {
+        toast.error(`Wrapperログイン開始に失敗: ${result.message}`)
+      } else {
+        toast.success('Wrapperログインを開始しました。SMS/2FAコードを入力してください。')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapperログイン開始に失敗: ${reason}`)
+    } finally {
+      setIsWrapperLoginStarting(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleWrapperStopLogin() {
+    setIsWrapperLoginStopping(true)
+    try {
+      const result = await window.api.appleMusicWrapperStopLogin()
+      if (!result.ok) {
+        toast.error(`Wrapperログイン停止に失敗: ${result.message}`)
+      } else {
+        toast.success('Wrapperログインコンテナを停止しました。')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapperログイン停止に失敗: ${reason}`)
+    } finally {
+      setIsWrapperLoginStopping(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleWrapperSubmitTwoFactorCode() {
+    if (!wrapperTwoFactorCode.trim()) {
+      toast.error('2FAコードを入力してください。')
+      return
+    }
+
+    setIsWrapperCodeSubmitting(true)
+    try {
+      const result = await window.api.appleMusicWrapperSubmitTwoFactorCode(
+        wrapperTwoFactorCode.trim(),
+      )
+      if (!result.ok) {
+        toast.error(`2FAコード送信に失敗: ${result.message}`)
+      } else {
+        toast.success('2FAコードを送信しました。ログイン完了を待ってください。')
+        setWrapperTwoFactorCode('')
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`2FAコード送信に失敗: ${reason}`)
+    } finally {
+      setIsWrapperCodeSubmitting(false)
+      await refreshWrapperStatus({ silent: true })
+    }
+  }
+
+  async function handleLoadWrapperLogs() {
+    setIsWrapperLogsLoading(true)
+    try {
+      const target = wrapperStatus?.login.state === 'running' ? 'login' : 'service'
+      const result = await window.api.appleMusicWrapperGetLogs(target)
+      if (!result.ok) {
+        toast.error(`Wrapperログ取得に失敗: ${result.message}`)
+      }
+      setWrapperLogsText(result.logs || '')
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      toast.error(`Wrapperログ取得に失敗: ${reason}`)
+    } finally {
+      setIsWrapperLogsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!desktop) return
+    void refreshWrapperStatus({ silent: true })
+  }, [desktop])
+
   return (
     <Root>
       <Header>
@@ -463,6 +670,244 @@ export function AppleMusicContent() {
                 'Check'
               )}
             </Button>
+          </ContentItemForm>
+        </ContentItem>
+      </Content>
+
+      <ContentSeparator />
+
+      <Content>
+        <ContentItem>
+          <ContentItemTitle>Wrapper Control (Docker)</ContentItemTitle>
+          <ContentItemForm className="max-w-none w-3/5 flex-col items-start gap-3">
+            <p className="text-xs text-muted-foreground">
+              初回は 1 → 2 → 3 の順で実行してください。完了後は 4
+              の開始/停止だけで運用できます。
+            </p>
+            <div className="w-full rounded-md border p-3 space-y-2">
+              <p className="text-xs text-muted-foreground">現在の状態</p>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={wrapperStatus?.dockerAvailable ? 'default' : 'outline'}>
+                  Docker {wrapperStatus?.dockerAvailable ? 'OK' : 'NG'}
+                </Badge>
+                <Badge variant={wrapperStatus?.imageExists ? 'default' : 'outline'}>
+                  Image {wrapperStatus?.imageExists ? 'Built' : 'Missing'}
+                </Badge>
+                <Badge variant={isWrapperLoginRunning ? 'default' : 'outline'}>
+                  Login {isWrapperLoginRunning ? 'Running' : 'Stopped'}
+                </Badge>
+                <Badge variant={isWrapperServiceRunning ? 'default' : 'outline'}>
+                  Service {isWrapperServiceRunning ? 'Running' : 'Stopped'}
+                </Badge>
+                <Badge variant={wrapperStatus?.hasMusicToken ? 'default' : 'outline'}>
+                  Token {wrapperStatus?.hasMusicToken ? 'Present' : 'Missing'}
+                </Badge>
+                <Badge variant={wrapperStatus?.accountReachable ? 'default' : 'outline'}>
+                  Reachable {wrapperStatus?.accountReachable ? 'Yes' : 'No'}
+                </Badge>
+                <Badge variant={wrapperReadyForPlayback ? 'default' : 'outline'}>
+                  Playback {wrapperReadyForPlayback ? 'Ready' : 'Not Ready'}
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground">{wrapperStatusText}</p>
+              <p className="text-[11px] text-muted-foreground break-all">
+                Wrapper Dir: {wrapperStatus?.wrapperDirPath ?? 'not found'}
+              </p>
+              {wrapperMusicTokenPreview && (
+                <p className="text-[11px] text-muted-foreground break-all">
+                  Token Preview: {wrapperMusicTokenPreview}
+                </p>
+              )}
+              <div className="flex w-full flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void refreshWrapperStatus()}
+                  disabled={!desktop || isRefreshingWrapperStatus}
+                >
+                  {isRefreshingWrapperStatus ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Refreshing...
+                    </>
+                  ) : (
+                    'Refresh Status'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleLoadWrapperLogs()}
+                  disabled={!desktop || isWrapperLogsLoading}
+                >
+                  {isWrapperLogsLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Loading Logs...
+                    </>
+                  ) : (
+                    'Load Logs'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-full rounded-md border p-3 space-y-3">
+              <p className="text-sm font-medium">1. 初回のみ: イメージ作成</p>
+              <p className="text-xs text-muted-foreground">
+                Build Image は最初だけ実行すればOKです。
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void handleWrapperBuildImage()}
+                disabled={!desktop || isWrapperBuilding}
+              >
+                {isWrapperBuilding ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Building...
+                  </>
+                ) : (
+                  'Build Image'
+                )}
+              </Button>
+            </div>
+
+            <div className="w-full rounded-md border p-3 space-y-3">
+              <p className="text-sm font-medium">2. 初回のみ: Apple ID ログイン開始</p>
+              <div className="grid w-full grid-cols-1 gap-2 md:grid-cols-2">
+                <Input
+                  type="text"
+                  value={wrapperUsername}
+                  onChange={(event) => setWrapperUsername(event.target.value)}
+                  placeholder="Apple ID"
+                />
+                <Input
+                  type="password"
+                  value={wrapperPassword}
+                  onChange={(event) => setWrapperPassword(event.target.value)}
+                  placeholder="Password"
+                />
+              </div>
+              <div className="flex w-full flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleWrapperStartLogin()}
+                  disabled={!desktop || isWrapperLoginStarting || isWrapperLoginRunning}
+                >
+                  {isWrapperLoginStarting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Starting Login...
+                    </>
+                  ) : (
+                    'Start Login'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleWrapperStopLogin()}
+                  disabled={!desktop || isWrapperLoginStopping || !isWrapperLoginRunning}
+                >
+                  {isWrapperLoginStopping ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Stopping Login...
+                    </>
+                  ) : (
+                    'Stop Login'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-full rounded-md border p-3 space-y-3">
+              <p className="text-sm font-medium">3. 初回のみ: 2FAコード送信</p>
+              <p className="text-xs text-muted-foreground">
+                スマホに届いた数字コードを入力して送信します。
+              </p>
+              <div className="grid w-full grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
+                <Input
+                  type="text"
+                  value={wrapperTwoFactorCode}
+                  onChange={(event) => setWrapperTwoFactorCode(event.target.value)}
+                  placeholder="2FA code (digits)"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleWrapperSubmitTwoFactorCode()}
+                  disabled={!desktop || isWrapperCodeSubmitting}
+                >
+                  {isWrapperCodeSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send 2FA'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-full rounded-md border p-3 space-y-3">
+              <p className="text-sm font-medium">4. 通常運用: サービス開始 / 停止</p>
+              <p className="text-xs text-muted-foreground">
+                2FA完了後はここだけ使えば再生できます。
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleWrapperStartService()}
+                  disabled={
+                    !desktop || isWrapperServiceStarting || isWrapperServiceRunning
+                  }
+                >
+                  {isWrapperServiceStarting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    'Start Service'
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleWrapperStopService()}
+                  disabled={
+                    !desktop || isWrapperServiceStopping || !isWrapperServiceRunning
+                  }
+                >
+                  {isWrapperServiceStopping ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Stopping...
+                    </>
+                  ) : (
+                    'Stop Service'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {wrapperLogsText.trim().length > 0 && (
+              <pre className="w-full max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+                {wrapperLogsText}
+              </pre>
+            )}
           </ContentItemForm>
         </ContentItem>
       </Content>

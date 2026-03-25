@@ -3,7 +3,7 @@ import { MicVocalIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/app/components/ui/button'
 import { SimpleTooltip } from '@/app/components/ui/simple-tooltip'
-import { useLyricsState, useMainDrawerState } from '@/store/player.store'
+import { useLyricsSidebarState } from '@/store/player.store'
 
 interface PlayerLyricsButtonProps {
   disabled?: boolean
@@ -11,13 +11,13 @@ interface PlayerLyricsButtonProps {
 
 export function PlayerLyricsButton({ disabled }: PlayerLyricsButtonProps) {
   const { t } = useTranslation()
-  const { mainDrawerState } = useMainDrawerState()
-  const { lyricsState, toggleLyricsAction } = useLyricsState()
+  const { lyricsSidebarState, toggleLyricsSidebarAction } =
+    useLyricsSidebarState()
 
-  const isActive = mainDrawerState && lyricsState
+  const isActive = lyricsSidebarState
 
   function handleClick() {
-    toggleLyricsAction()
+    toggleLyricsSidebarAction()
   }
 
   return (

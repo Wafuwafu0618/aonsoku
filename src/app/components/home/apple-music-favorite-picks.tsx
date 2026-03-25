@@ -2,6 +2,7 @@ import { Play } from 'lucide-react'
 import { useMemo } from 'react'
 import { Button } from '@/app/components/ui/button'
 import { useSearchAppleMusic } from '@/app/hooks/use-apple-music'
+import { mapAppleMusicSongToAppSong } from '@/domain/mappers/apple-music'
 import { useAppleMusicFavoriteGenres } from '@/store/app.store'
 import { usePlayerActions } from '@/store/player.store'
 import { AppleMusicSong } from '@/types/responses/apple-music'
@@ -121,7 +122,9 @@ export function AppleMusicFavoriteGenrePicks() {
                 size="icon"
                 variant="outline"
                 className="absolute right-3 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full border-white/25 bg-background/55 opacity-100 backdrop-blur-sm sm:opacity-0 sm:group-hover:opacity-100"
-                onClick={() => setSongList([song as any], 0)}
+                onClick={() =>
+                  setSongList([mapAppleMusicSongToAppSong(song)], 0)
+                }
                 aria-label={`Play ${song.title}`}
               >
                 <Play className="h-4 w-4 fill-current" />

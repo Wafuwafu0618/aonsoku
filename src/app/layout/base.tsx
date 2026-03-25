@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { MainDrawerPage } from '@/app/components/drawer/page'
 import { FullscreenMode } from '@/app/components/fullscreen/page'
 import { Player } from '@/app/components/player/player'
+import { PlayerLyricsSidebar } from '@/app/components/player/lyrics-sidebar'
 import { CreatePlaylistDialog } from '@/app/components/playlist/form-dialog'
 import { RemovePlaylistDialog } from '@/app/components/playlist/remove-dialog'
 import { AppSidebar } from '@/app/components/sidebar/app-sidebar'
@@ -18,6 +19,7 @@ import { MainRoutes } from './main'
 
 const MemoHeader = memo(Header)
 const MemoPlayer = memo(Player)
+const MemoPlayerLyricsSidebar = memo(PlayerLyricsSidebar)
 const MemoSongInfoDialog = memo(SongInfoDialog)
 const MemoRemovePlaylistDialog = memo(RemovePlaylistDialog)
 const MemoMainDrawerPage = memo(MainDrawerPage)
@@ -51,6 +53,7 @@ export default function BaseLayout() {
             <MainSidebarInset>
               <MainRoutes />
             </MainSidebarInset>
+            <MemoPlayerLyricsSidebar />
             <MemoPlayer />
           </MainSidebarProvider>
           <MemoSongInfoDialog />

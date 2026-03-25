@@ -1,14 +1,35 @@
 import { Apple, Music } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { SimpleTooltip } from '@/app/components/ui/simple-tooltip'
 import { Switch } from '@/app/components/ui/switch'
+import { ROUTES } from '@/routes/routesList'
 import { useMediaLibraryMode } from '@/store/app.store'
 
 export function ModeToggle() {
   const { mode, setMode } = useMediaLibraryMode()
+  const location = useLocation()
+  const navigate = useNavigate()
   const isAppleMusic = mode === 'applemusic'
 
   const handleToggle = (checked: boolean) => {
-    setMode(checked ? 'applemusic' : 'navidrome')
+    const nextMode = checked ? 'applemusic' : 'navidrome'
+    setMode(nextMode)
+
+    const isAppleMusicExclusiveRoute =
+      location.pathname === ROUTES.LIBRARY.APPLE_MUSIC ||
+      location.pathname.startsWith('/apple-music/')
+
+    if (nextMode === 'navidrome' && isAppleMusicExclusiveRoute) {
+      navigate(ROUTES.LIBRARY.HOME)
+      return
+    }
+
+    if (
+      nextMode === 'applemusic' &&
+      location.pathname === ROUTES.LIBRARY.FAVORITES
+    ) {
+      navigate(ROUTES.LIBRARY.APPLE_MUSIC)
+    }
   }
 
   return (
