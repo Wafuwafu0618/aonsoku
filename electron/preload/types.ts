@@ -77,6 +77,14 @@ export enum IpcChannels {
   AppleMusicGetDebugReport = 'apple-music-get-debug-report',
   AppleMusicOpenSignInWindow = 'apple-music-open-sign-in-window',
   AppleMusicApiRequest = 'apple-music-api-request',
+  RemoteRelayStateUpdate = 'remote-relay-state-update',
+  RemoteRelayGetStatus = 'remote-relay-get-status',
+  RemoteRelayStartTunnel = 'remote-relay-start-tunnel',
+  RemoteRelayStopTunnel = 'remote-relay-stop-tunnel',
+  RemoteRelayCommand = 'remote-relay-command',
+  RemoteRelayLifecycle = 'remote-relay-lifecycle',
+  RemoteLibraryRequest = 'remote-library-request',
+  RemoteLibraryResponse = 'remote-library-response',
 }
 
 export interface LocalLibraryDirectoryEntry {
@@ -197,12 +205,18 @@ export type NativeAudioEventType =
   | 'ended'
   | 'error'
   | 'deviceChanged'
+  | 'relayPcmFormat'
+  | 'relayPcmChunk'
 
 export interface NativeAudioEvent {
   type: NativeAudioEventType
   currentTimeSeconds?: number
   durationSeconds?: number
   error?: NativeAudioErrorPayload
+  sampleRateHz?: number
+  channels?: number
+  sampleFormat?: 's16le'
+  pcmBase64?: string
 }
 
 export interface SpotifyConnectInitializeRequest {
@@ -421,6 +435,87 @@ export interface AppleMusicOpenSignInResult {
   error?: { code: string; message: string }
 }
 
+export type RemoteRelayStreamProfile = 'alac' | 'aac'
+
+export type RemoteRelayMediaSource = 'navidrome' | 'local' | 'unsupported'
+
+export type RemotePlaybackTarget = 'desktop' | 'mobile'
+
+export interface RemotePlaybackDevice {
+  id: RemotePlaybackTarget
+  name: string
+  description?: string
+  selected: boolean
+}
+
+export interface RemoteRelayNowPlaying {
+  id?: string
+  title?: string
+  artist?: string
+  album?: string
+  coverArtId?: string
+}
+
+export interface RemoteRelayStateUpdatePayload {
+  mediaType: 'song' | 'radio' | 'podcast'
+  source: RemoteRelayMediaSource
+  src?: string
+  sourceCodec?: string
+  sourceSampleRateHz?: number
+  targetSampleRateHz?: number
+  oversamplingFilterId?: string
+  signalPath?: string
+  isPlaying: boolean
+  currentTimeSeconds: number
+  durationSeconds: number
+  volume: number
+  hasPrev: boolean
+  hasNext: boolean
+  nowPlaying?: RemoteRelayNowPlaying
+}
+
+export type RemoteRelayCommandType =
+  | 'playPause'
+  | 'prev'
+  | 'next'
+  | 'seek'
+  | 'setVolume'
+  | 'playAlbum'
+  | 'playSong'
+  | 'setPlaybackTarget'
+
+export interface RemoteRelayCommandPayload {
+  command: RemoteRelayCommandType
+  value?: number
+  albumId?: string
+  songId?: string
+  target?: RemotePlaybackTarget
+}
+
+export interface RemoteRelayLifecycleEvent {
+  remoteSessionActive: boolean
+  reason?: string
+}
+
+export interface RemoteRelayTunnelCommandResult {
+  ok: boolean
+  message: string
+}
+
+export interface RemoteRelayStatus {
+  enabled: boolean
+  localPort: number
+  localUrl: string
+  tunnelRunning: boolean
+  tunnelStatus: 'stopped' | 'starting' | 'running' | 'error'
+  tunnelMessage: string
+  remoteSessionActive: boolean
+  defaultProfile: RemoteRelayStreamProfile
+  streamProfile: RemoteRelayStreamProfile
+  cloudflaredPath: string
+  tunnelArgs: string
+}
+
 export interface IAonsokuAPI {
   enterFullScreen: () => void
   exitFullScreen: () => void
@@ -470,7 +565,9 @@ export interface IAonsokuAPI {
   ) => Promise<NativeAudioCommandResult>
   nativeAudioPlay: () => Promise<NativeAudioCommandResult>
   nativeAudioPause: () => Promise<NativeAudioCommandResult>
-  nativeAudioSeek: (positionSeconds: number) => Promise<NativeAudioCommandResult>
+  nativeAudioSeek: (
+    positionSeconds: number,
+  ) => Promise<NativeAudioCommandResult>
   nativeAudioSetVolume: (volume: number) => Promise<NativeAudioCommandResult>
   nativeAudioSetLoop: (loop: boolean) => Promise<NativeAudioCommandResult>
   nativeAudioSetPlaybackRate: (
@@ -498,7 +595,9 @@ export interface IAonsokuAPI {
     payload: SpotifyConnectOAuthRefreshRequest,
   ) => Promise<SpotifyConnectOAuthTokenResult>
   spotifyConnectDispose: () => Promise<SpotifyConnectCommandResult>
-  spotifyConnectEventListener: (func: (event: SpotifyConnectEvent) => void) => void
+  spotifyConnectEventListener: (
+    func: (event: SpotifyConnectEvent) => void,
+  ) => void
   removeSpotifyConnectEventListener: () => void
   appleMusicResolve: (adamId: string) => Promise<AppleMusicResolveResult>
   appleMusicSetWrapperConfig: (config: AppleMusicWrapperConfig) => Promise<void>
@@ -523,4 +622,32 @@ export interface IAonsokuAPI {
   appleMusicApiRequest: (
     payload: AppleMusicApiRequestPayload,
   ) => Promise<AppleMusicApiResponse>
+  remoteRelayUpdateState: (payload: RemoteRelayStateUpdatePayload) => void
+  remoteRelayGetStatus: () => Promise<RemoteRelayStatus>
+  remoteRelayStartTunnel: () => Promise<RemoteRelayTunnelCommandResult>
+  remoteRelayStopTunnel: () => Promise<RemoteRelayTunnelCommandResult>
+  remoteRelayCommandListener: (
+    func: (payload: RemoteRelayCommandPayload) => void,
+  ) => void
+  removeRemoteRelayCommandListener: () => void
+  remoteRelayLifecycleListener: (
+    func: (payload: RemoteRelayLifecycleEvent) => void,
+  ) => void
+  removeRemoteRelayLifecycleListener: () => void
+  remoteLibraryRequestListener: (
+    func: (request: RemoteLibraryRequest) => void,
+  ) => void
+  removeRemoteLibraryRequestListener: () => void
+  sendRemoteLibraryResponse: (response: RemoteLibraryResponse) => void
+}
+
+export interface RemoteLibraryRequest {
+  requestId: string
+  channel: string
+  data: unknown
+}
+
+export interface RemoteLibraryResponse {
+  requestId: string
+  data: unknown
 }

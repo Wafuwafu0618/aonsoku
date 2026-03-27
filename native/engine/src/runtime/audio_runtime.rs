@@ -1,7 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -79,6 +79,20 @@ pub struct AudioRuntime {
     pub exclusive_lock_path: PathBuf,
     pub active_output_mode: OutputMode,
     pub exclusive_probe_verified: bool,
+    pub remote_relay_pcm_enabled: Arc<AtomicBool>,
+    pub remote_relay_pcm_mode: Arc<AtomicU8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteRelayPcmMode {
+    Tap = 0,
+    StreamOnly = 1,
+}
+
+impl RemoteRelayPcmMode {
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
 }
 
 impl Default for AudioRuntime {
@@ -104,6 +118,8 @@ impl Default for AudioRuntime {
             exclusive_lock_path: std::env::temp_dir().join(EXCLUSIVE_LOCK_FILE_NAME),
             active_output_mode: OutputMode::WasapiShared,
             exclusive_probe_verified: false,
+            remote_relay_pcm_enabled: Arc::new(AtomicBool::new(false)),
+            remote_relay_pcm_mode: Arc::new(AtomicU8::new(RemoteRelayPcmMode::Tap.as_u8())),
         }
     }
 }
@@ -460,6 +476,17 @@ impl AudioRuntime {
         self.exclusive_playback_ended = false;
     }
 
+    pub fn set_remote_relay_pcm(
+        &self,
+        enabled: bool,
+        mode: RemoteRelayPcmMode,
+    ) {
+        self.remote_relay_pcm_enabled
+            .store(enabled, Ordering::Relaxed);
+        self.remote_relay_pcm_mode
+            .store(mode.as_u8(), Ordering::Relaxed);
+    }
+
     fn prepare_exclusive_playback(&mut self, state: &EngineState) -> Result<(), String> {
         let loaded_audio = self
             .loaded_audio
@@ -532,6 +559,8 @@ impl AudioRuntime {
         self.exclusive_playback_ended = false;
 
         let generation_id = params.generation_id;
+        let relay_pcm_enabled = Arc::clone(&self.remote_relay_pcm_enabled);
+        let relay_pcm_mode = Arc::clone(&self.remote_relay_pcm_mode);
         let started_for_worker = Arc::clone(&started);
         let finished_for_worker = Arc::clone(&finished);
         let ended_naturally_for_worker = Arc::clone(&ended_naturally);
@@ -548,6 +577,8 @@ impl AudioRuntime {
                 params.oversampling_filter_id,
                 params.parametric_eq,
                 stop_receiver,
+                relay_pcm_enabled,
+                relay_pcm_mode,
             );
 
             match playback_result {

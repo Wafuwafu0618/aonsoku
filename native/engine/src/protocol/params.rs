@@ -10,6 +10,14 @@ pub struct SetOutputModeParams {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SetRelayPcmParams {
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoadParams {
     pub src: String,
     #[serde(default)]

@@ -807,6 +807,19 @@
         "preferSynced": {
           "label": "同期歌詞を優先",
           "info": "有効にすると、同期されていない歌詞よりも同期歌詞が優先されます。"
+        },
+        "cache": {
+          "group": "歌詞キャッシュ",
+          "refresh": "統計を更新",
+          "summary": "合計 {{total}} / 取得済み {{found}} / 未検出 {{notFound}} / エラー {{error}}",
+          "prefetch": "ローカル曲を一括プリフェッチ",
+          "prefetching": "キュー投入中...",
+          "prefetchQueued": "{{count}} 曲を歌詞プリフェッチに投入しました。",
+          "prefetchError": "歌詞プリフェッチの投入に失敗しました: {{reason}}",
+          "emptyLibrary": "ローカル曲が見つかりません。",
+          "clear": "キャッシュをクリア",
+          "cleared": "歌詞キャッシュをクリアしました。",
+          "clearError": "歌詞キャッシュのクリアに失敗しました: {{reason}}"
         }
       }
     },
@@ -890,6 +903,11 @@
         "description": "現在再生中の曲をDiscordの友人と共有します。",
         "enabled": {
           "label": "連携を有効にする"
+        },
+        "clientId": {
+          "label": "Discord Application ID",
+          "info": "Discord の Application ID（Client ID）を入力してください。Public Key は使用できません。",
+          "placeholder": "Discord Application ID（数字）を入力"
         }
       }
     },
@@ -901,6 +919,45 @@
           "label": "トレイに最小化",
           "info": "有効にすると、閉じるボタンをクリックしたときにアプリを閉じる代わりにシステムトレイに最小化します。"
         }
+      },
+      "remote": {
+        "enabled": {
+          "label": "リモート中継を有効化",
+          "info": "リモート中継機能の設定を有効化します。トンネル開始は手動です。"
+        },
+        "localPort": {
+          "label": "ローカルポート",
+          "info": "内蔵リモート中継HTTPサーバーのバインドポートです。"
+        },
+        "defaultProfile": {
+          "label": "既定ストリーム品質",
+          "info": "リモート中継開始時に使用する品質プロファイルです。"
+        },
+        "cloudflaredPath": {
+          "label": "cloudflared パス",
+          "info": "cloudflared 実行ファイルの絶対パスを指定します。",
+          "placeholder": "C:\\Program Files\\cloudflared\\cloudflared.exe"
+        },
+        "tunnelArgs": {
+          "label": "トンネル引数",
+          "info": "トンネル起動時に cloudflared に渡す引数です。",
+          "placeholder": "tunnel --url http://127.0.0.1:39096 run minato-remote"
+        },
+        "status": {
+          "label": "中継状態",
+          "info": "現在のリモート中継とトンネルの状態です。",
+          "value": "Tunnel: {{status}} / {{message}}",
+          "localUrl": "ローカルURL: {{url}}",
+          "empty": "ステータスメッセージなし"
+        },
+        "actions": {
+          "refresh": "再取得",
+          "start": "トンネル開始",
+          "stop": "トンネル停止"
+        },
+        "statusFetchError": "リモート中継状態の取得に失敗しました: {{reason}}",
+        "startError": "トンネル開始に失敗しました: {{reason}}",
+        "stopError": "トンネル停止に失敗しました: {{reason}}"
       }
     }
   },

@@ -22,6 +22,7 @@ import {
   removeTracksByDirectory,
 } from '@/local-library'
 import { pickLocalLibraryDirectory } from '@/platform'
+import { enqueueLyricsPrefetchBatch } from '@/service/lyrics-prefetch'
 import {
   useLocalLibraryActions,
   useLocalLibraryDirectories,
@@ -125,8 +126,17 @@ export function LocalLibraryContent() {
                 : undefined,
           })
         },
-        async () => {
-          await refreshLibrarySummary()
+        (scanResult) => {
+          void refreshLibrarySummary()
+          enqueueLyricsPrefetchBatch(
+            scanResult.tracks.map((track) => ({
+              id: track.id,
+              artist: track.artist,
+              title: track.title,
+              album: track.album,
+              duration: track.duration,
+            })),
+          )
         },
       )
     } catch (error) {

@@ -1,4 +1,5 @@
 import { ReactNode } from 'react'
+import { usePlayerUiStore } from '@/store/player-ui.store'
 import { ISong } from '@/types/responses/song'
 import { TrackInfo } from './track-info'
 
@@ -10,6 +11,7 @@ describe('TrackInfo Component', () => {
   beforeEach(() => {
     cy.mockCoverArt()
     cy.viewport('macbook-11')
+    usePlayerUiStore.getState().actions.resetFullscreen()
   })
 
   it('should display track info without link', () => {
@@ -87,7 +89,7 @@ describe('TrackInfo Component', () => {
         .and('have.text', 'No song playing')
     })
 
-    it('should create the fullscreen button and show tooltip', () => {
+    it('should open fullscreen when album art is clicked', () => {
       cy.fixture('songs/song').then((song: ISong) => {
         cy.mount(
           <Wrapper>
@@ -95,12 +97,14 @@ describe('TrackInfo Component', () => {
           </Wrapper>,
         )
 
-        cy.getByTestId('track-fullscreen-button')
-          .should('exist')
-          .and('have.css', 'opacity', '0')
+        cy.getByTestId('track-open-fullscreen')
+          .should('be.visible')
+          .and('have.attr', 'aria-label', 'Switch to fullscreen')
+          .click()
 
-        cy.getByTestId('track-fullscreen-button').wait(1500).realHover()
-        cy.contains('Switch to fullscreen').should('be.visible')
+        cy.then(() => {
+          expect(usePlayerUiStore.getState().isFullscreen).to.equal(true)
+        })
       })
     })
   })
@@ -126,7 +130,7 @@ describe('TrackInfo Component', () => {
         .and('have.text', 'Nenhuma música tocando')
     })
 
-    it('should create the fullscreen button and show tooltip', () => {
+    it('should open fullscreen when album art is clicked', () => {
       cy.fixture('songs/song').then((song: ISong) => {
         cy.mount(
           <Wrapper>
@@ -134,12 +138,14 @@ describe('TrackInfo Component', () => {
           </Wrapper>,
         )
 
-        cy.getByTestId('track-fullscreen-button')
-          .should('exist')
-          .and('have.css', 'opacity', '0')
+        cy.getByTestId('track-open-fullscreen')
+          .should('be.visible')
+          .and('have.attr', 'aria-label', 'Mudar para tela cheia')
+          .click()
 
-        cy.getByTestId('track-fullscreen-button').wait(1500).realHover()
-        cy.contains('Mudar para tela cheia').should('be.visible')
+        cy.then(() => {
+          expect(usePlayerUiStore.getState().isFullscreen).to.equal(true)
+        })
       })
     })
   })

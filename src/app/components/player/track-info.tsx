@@ -9,9 +9,14 @@ import { Link } from 'react-router-dom'
 import { MarqueeTitle } from '@/app/components/fullscreen/marquee-title'
 import { ImageLoader } from '@/app/components/image-loader'
 import { SourceBadge } from '@/app/components/source-badge'
+import { SimpleTooltip } from '@/app/components/ui/simple-tooltip'
 import { cn } from '@/lib/utils'
 import { ROUTES } from '@/routes/routesList'
-import { usePlaybackQueueState, useSongColor } from '@/store/player.store'
+import {
+  usePlaybackQueueState,
+  usePlayerFullscreen,
+  useSongColor,
+} from '@/store/player.store'
 import { ISong } from '@/types/responses/song'
 import { getAverageColor } from '@/utils/getAverageColor'
 import { logger } from '@/utils/logger'
@@ -21,6 +26,7 @@ export function TrackInfo({ song }: { song: ISong | undefined }) {
   const { t } = useTranslation()
   const { setCurrentSongColor, currentSongColor } = useSongColor()
   const { currentQueueItem } = usePlaybackQueueState()
+  const { setIsFullscreen } = usePlayerFullscreen()
 
   const getImageElement = useCallback(() => {
     return document.getElementById('track-song-image') as HTMLImageElement
@@ -74,26 +80,34 @@ export function TrackInfo({ song }: { song: ISong | undefined }) {
   return (
     <Fragment>
       <div className="group relative">
-        <div className="min-w-[70px] max-w-[70px] aspect-square bg-cover bg-center bg-skeleton rounded overflow-hidden shadow-md">
-          <ImageLoader id={song.coverArt} type="song" size={400}>
-            {(src) => (
-              <LazyLoadImage
-                key={song.id}
-                id="track-song-image"
-                src={src}
-                width="100%"
-                height="100%"
-                crossOrigin="anonymous"
-                effect="opacity"
-                className="aspect-square object-cover w-full h-full bg-skeleton text-transparent"
-                data-testid="track-image"
-                alt={`${song.artist} - ${song.title}`}
-                onLoad={getImageColor}
-                onError={handleError}
-              />
-            )}
-          </ImageLoader>
-        </div>
+        <SimpleTooltip text={t('fullscreen.switchButton')}>
+          <button
+            type="button"
+            className="min-w-[70px] max-w-[70px] aspect-square bg-cover bg-center bg-skeleton rounded overflow-hidden shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            data-testid="track-open-fullscreen"
+            aria-label={t('fullscreen.switchButton')}
+            onClick={() => setIsFullscreen(true)}
+          >
+            <ImageLoader id={song.coverArt} type="song" size={400}>
+              {(src) => (
+                <LazyLoadImage
+                  key={song.id}
+                  id="track-song-image"
+                  src={src}
+                  width="100%"
+                  height="100%"
+                  crossOrigin="anonymous"
+                  effect="opacity"
+                  className="aspect-square object-cover w-full h-full bg-skeleton text-transparent"
+                  data-testid="track-image"
+                  alt={`${song.artist} - ${song.title}`}
+                  onLoad={getImageColor}
+                  onError={handleError}
+                />
+              )}
+            </ImageLoader>
+          </button>
+        </SimpleTooltip>
       </div>
       <div className="flex flex-col justify-center w-full overflow-hidden">
         <MarqueeTitle gap="mr-2">

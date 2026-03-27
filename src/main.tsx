@@ -13,9 +13,18 @@ import '@/i18n'
 import App from '@/App'
 
 import { queryClient } from '@/lib/queryClient'
+import { initializeRemoteLibraryHandler } from './remote-library-handler'
 import { blockFeatures } from '@/utils/browser'
 
 blockFeatures()
+
+if (
+  typeof window !== 'undefined' &&
+  window.api?.remoteLibraryRequestListener &&
+  window.api?.sendRemoteLibraryResponse
+) {
+  initializeRemoteLibraryHandler()
+}
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>

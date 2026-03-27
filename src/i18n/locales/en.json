@@ -702,6 +702,19 @@
         "preferSynced": {
           "label": "Prefer synced lyrics",
           "info": "When enabled, synced lyrics will be prioritized over unsynced lyrics."
+        },
+        "cache": {
+          "group": "Lyrics Cache",
+          "refresh": "Refresh stats",
+          "summary": "Total {{total}} / Found {{found}} / Not found {{notFound}} / Errors {{error}}",
+          "prefetch": "Prefetch local library",
+          "prefetching": "Queueing...",
+          "prefetchQueued": "Queued {{count}} tracks for lyrics prefetch.",
+          "prefetchError": "Failed to queue lyrics prefetch: {{reason}}",
+          "emptyLibrary": "No local tracks were found.",
+          "clear": "Clear cache",
+          "cleared": "Lyrics cache cleared.",
+          "clearError": "Failed to clear lyrics cache: {{reason}}"
         }
       }
     },
@@ -760,6 +773,11 @@
         "description": "Share your currently playing song with friends on Discord.",
         "enabled": {
           "label": "Enable Integration"
+        },
+        "clientId": {
+          "label": "Discord Application ID",
+          "info": "Use the Discord Application ID (Client ID). Public Key will not work.",
+          "placeholder": "Enter Discord Application ID (numeric)"
         }
       }
     },
@@ -771,6 +789,45 @@
           "label": "Minimize to Tray",
           "info": "When enabled, the app will minimize to the system tray instead of closing when you click the close button."
         }
+      },
+      "remote": {
+        "enabled": {
+          "label": "Enable Remote Relay",
+          "info": "Enable remote relay settings. Tunnel start remains manual."
+        },
+        "localPort": {
+          "label": "Local Port",
+          "info": "Local bind port for the embedded remote relay HTTP server."
+        },
+        "defaultProfile": {
+          "label": "Default Stream Profile",
+          "info": "Initial stream profile used by the remote relay."
+        },
+        "cloudflaredPath": {
+          "label": "cloudflared Path",
+          "info": "Absolute path to cloudflared executable.",
+          "placeholder": "C:\\Program Files\\cloudflared\\cloudflared.exe"
+        },
+        "tunnelArgs": {
+          "label": "Tunnel Arguments",
+          "info": "Arguments passed to cloudflared when starting the tunnel.",
+          "placeholder": "tunnel --url http://127.0.0.1:39096 run minato-remote"
+        },
+        "status": {
+          "label": "Relay Status",
+          "info": "Current remote relay and tunnel runtime state.",
+          "value": "Tunnel: {{status}} / {{message}}",
+          "localUrl": "Local URL: {{url}}",
+          "empty": "No status message"
+        },
+        "actions": {
+          "refresh": "Refresh",
+          "start": "Start Tunnel",
+          "stop": "Stop Tunnel"
+        },
+        "statusFetchError": "Failed to fetch remote relay status: {{reason}}",
+        "startError": "Failed to start tunnel: {{reason}}",
+        "stopError": "Failed to stop tunnel: {{reason}}"
       }
     }
   },

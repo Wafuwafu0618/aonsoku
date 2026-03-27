@@ -1,4 +1,6 @@
 use crate::protocol::*;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 use std::io::{self, Write};
 
 pub fn write_json_line<T: serde::Serialize>(value: &T) -> io::Result<()> {
@@ -23,6 +25,10 @@ pub fn emit_event(
             event_type: event_type.to_string(),
             current_time_seconds: current_time,
             duration_seconds: duration,
+            sample_rate_hz: None,
+            channels: None,
+            sample_format: None,
+            pcm_base64: None,
             error,
         },
     };
@@ -35,6 +41,48 @@ pub fn emit_simple_event(
     duration: Option<f64>,
 ) -> io::Result<()> {
     emit_event(event_type, current_time, duration, None)
+}
+
+pub fn emit_relay_pcm_format(
+    sample_rate_hz: u32,
+    channels: u16,
+    sample_format: &str,
+) -> io::Result<()> {
+    write_json_line(&SidecarEventEnvelope {
+        kind: "event".to_string(),
+        event: NativeAudioEvent {
+            event_type: "relayPcmFormat".to_string(),
+            current_time_seconds: None,
+            duration_seconds: None,
+            sample_rate_hz: Some(sample_rate_hz),
+            channels: Some(channels),
+            sample_format: Some(sample_format.to_string()),
+            pcm_base64: None,
+            error: None,
+        },
+    })
+}
+
+pub fn emit_relay_pcm_chunk(
+    sample_rate_hz: u32,
+    channels: u16,
+    sample_format: &str,
+    pcm_bytes: &[u8],
+) -> io::Result<()> {
+    let encoded = BASE64_STANDARD.encode(pcm_bytes);
+    write_json_line(&SidecarEventEnvelope {
+        kind: "event".to_string(),
+        event: NativeAudioEvent {
+            event_type: "relayPcmChunk".to_string(),
+            current_time_seconds: None,
+            duration_seconds: None,
+            sample_rate_hz: Some(sample_rate_hz),
+            channels: Some(channels),
+            sample_format: Some(sample_format.to_string()),
+            pcm_base64: Some(encoded),
+            error: None,
+        },
+    })
 }
 
 pub fn emit_error_event(

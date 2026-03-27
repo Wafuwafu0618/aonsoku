@@ -18,6 +18,7 @@ type SidecarCommand =
   | 'initialize'
   | 'listDevices'
   | 'setOutputMode'
+  | 'setRelayPcm'
   | 'load'
   | 'play'
   | 'pause'
@@ -26,6 +27,8 @@ type SidecarCommand =
   | 'setLoop'
   | 'setPlaybackRate'
   | 'dispose'
+
+type RelayPcmMode = 'tap' | 'streamOnly'
 
 interface SidecarRequest {
   kind: 'request'
@@ -192,6 +195,13 @@ class NativeAudioSidecarClient {
 
   async setOutputMode(mode: NativeAudioOutputMode): Promise<NativeAudioCommandResult> {
     return this.sendCommandResult('setOutputMode', { mode })
+  }
+
+  async setRelayPcm(
+    enabled: boolean,
+    mode: RelayPcmMode = 'tap',
+  ): Promise<NativeAudioCommandResult> {
+    return this.sendCommandResult('setRelayPcm', { enabled, mode })
   }
 
   async load(payload: NativeAudioLoadRequest): Promise<NativeAudioCommandResult> {

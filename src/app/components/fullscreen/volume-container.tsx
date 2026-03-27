@@ -11,7 +11,7 @@ export function VolumeContainer() {
       <MuteButton className={buttonsStyle.secondary}>
         <VolumeIcon volume={volume} className={buttonsStyle.secondaryIcon} />
       </MuteButton>
-      <VolumeSlider variant="secondary" className="h-3" />
+      <VolumeSlider className="h-3" />
     </div>
   )
 }

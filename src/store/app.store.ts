@@ -50,9 +50,15 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
           accounts: {
             discord: {
               rpcEnabled: false,
+              rpcClientId: '',
               setRpcEnabled: (value) => {
                 set((state) => {
                   state.accounts.discord.rpcEnabled = value
+                })
+              },
+              setRpcClientId: (value) => {
+                set((state) => {
+                  state.accounts.discord.rpcClientId = value.trim()
                 })
               },
             },
@@ -146,11 +152,43 @@ export const useAppStore = createWithEqualityFn<IAppContext>()(
           desktop: {
             data: {
               minimizeToTray: false,
+              remoteRelay: {
+                enabled: false,
+                localPort: 39096,
+                cloudflaredPath: '',
+                tunnelArgs: '',
+                defaultProfile: 'alac' as const,
+              },
             },
             actions: {
               setMinimizeToTray: (value) => {
                 set((state) => {
                   state.desktop.data.minimizeToTray = value
+                })
+              },
+              setRemoteRelayEnabled: (value) => {
+                set((state) => {
+                  state.desktop.data.remoteRelay.enabled = value
+                })
+              },
+              setRemoteRelayLocalPort: (value) => {
+                set((state) => {
+                  state.desktop.data.remoteRelay.localPort = value
+                })
+              },
+              setRemoteRelayCloudflaredPath: (value) => {
+                set((state) => {
+                  state.desktop.data.remoteRelay.cloudflaredPath = value
+                })
+              },
+              setRemoteRelayTunnelArgs: (value) => {
+                set((state) => {
+                  state.desktop.data.remoteRelay.tunnelArgs = value
+                })
+              },
+              setRemoteRelayDefaultProfile: (value) => {
+                set((state) => {
+                  state.desktop.data.remoteRelay.defaultProfile = value
                 })
               },
             },
@@ -385,6 +423,16 @@ useAppStore.subscribe(
     } else {
       discordRpc.clear()
     }
+  },
+)
+
+useAppStore.subscribe(
+  (state) => state.accounts.discord.rpcClientId,
+  () => {
+    const { rpcEnabled } = useAppStore.getState().accounts.discord
+    if (!rpcEnabled) return
+    // Client ID変更時に即時再送してRPC再初期化を促す
+    discordRpc.sendCurrentSong()
   },
 )
 

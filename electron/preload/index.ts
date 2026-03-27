@@ -8,6 +8,10 @@ import {
   NativeAudioEvent,
   NativeAudioOutputMode,
   PlayerStateListenerActions,
+  RemoteLibraryRequest,
+  RemoteRelayCommandPayload,
+  RemoteRelayLifecycleEvent,
+  RemoteRelayStateUpdatePayload,
   SpotifyConnectEvent,
 } from './types'
 
@@ -132,7 +136,8 @@ const api: IAonsokuAPI = {
     ipcRenderer.invoke(IpcChannels.SpotifyConnectInitialize, payload),
   spotifyConnectStartReceiver: () =>
     ipcRenderer.invoke(IpcChannels.SpotifyConnectStartReceiver),
-  spotifyConnectStatus: () => ipcRenderer.invoke(IpcChannels.SpotifyConnectStatus),
+  spotifyConnectStatus: () =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectStatus),
   spotifyConnectListDevices: () =>
     ipcRenderer.invoke(IpcChannels.SpotifyConnectListDevices),
   spotifyConnectSetActiveDevice: (payload) =>
@@ -143,7 +148,8 @@ const api: IAonsokuAPI = {
     ipcRenderer.invoke(IpcChannels.SpotifyConnectOAuthAuthorize, payload),
   spotifyConnectOAuthRefresh: (payload) =>
     ipcRenderer.invoke(IpcChannels.SpotifyConnectOAuthRefresh, payload),
-  spotifyConnectDispose: () => ipcRenderer.invoke(IpcChannels.SpotifyConnectDispose),
+  spotifyConnectDispose: () =>
+    ipcRenderer.invoke(IpcChannels.SpotifyConnectDispose),
   spotifyConnectEventListener: (func) => {
     ipcRenderer.on(
       IpcChannels.SpotifyConnectEvent,
@@ -183,6 +189,45 @@ const api: IAonsokuAPI = {
     ipcRenderer.invoke(IpcChannels.AppleMusicOpenSignInWindow),
   appleMusicApiRequest: (payload) =>
     ipcRenderer.invoke(IpcChannels.AppleMusicApiRequest, payload),
+  remoteRelayUpdateState: (payload: RemoteRelayStateUpdatePayload) => {
+    ipcRenderer.send(IpcChannels.RemoteRelayStateUpdate, payload)
+  },
+  remoteRelayGetStatus: () =>
+    ipcRenderer.invoke(IpcChannels.RemoteRelayGetStatus),
+  remoteRelayStartTunnel: () =>
+    ipcRenderer.invoke(IpcChannels.RemoteRelayStartTunnel),
+  remoteRelayStopTunnel: () =>
+    ipcRenderer.invoke(IpcChannels.RemoteRelayStopTunnel),
+  remoteRelayCommandListener: (func) => {
+    ipcRenderer.on(
+      IpcChannels.RemoteRelayCommand,
+      (_, payload: RemoteRelayCommandPayload) => func(payload),
+    )
+  },
+  removeRemoteRelayCommandListener: () => {
+    ipcRenderer.removeAllListeners(IpcChannels.RemoteRelayCommand)
+  },
+  remoteRelayLifecycleListener: (func) => {
+    ipcRenderer.on(
+      IpcChannels.RemoteRelayLifecycle,
+      (_, payload: RemoteRelayLifecycleEvent) => func(payload),
+    )
+  },
+  removeRemoteRelayLifecycleListener: () => {
+    ipcRenderer.removeAllListeners(IpcChannels.RemoteRelayLifecycle)
+  },
+  remoteLibraryRequestListener: (func) => {
+    ipcRenderer.on(
+      IpcChannels.RemoteLibraryRequest,
+      (_, request: RemoteLibraryRequest) => func(request),
+    )
+  },
+  removeRemoteLibraryRequestListener: () => {
+    ipcRenderer.removeAllListeners(IpcChannels.RemoteLibraryRequest)
+  },
+  sendRemoteLibraryResponse: (response) => {
+    ipcRenderer.send(IpcChannels.RemoteLibraryResponse, response)
+  },
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -43,6 +43,7 @@ dependencies = [
 name = "aonsoku-native-audio-engine"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cpal",
  "crossterm",
  "ratatui",

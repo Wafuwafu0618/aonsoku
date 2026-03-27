@@ -1,0 +1,79 @@
+{
+  "source": "C:\\aonsoku\\cypress\\fixtures\\song.mp3",
+  "sourceSampleRateHz": 44100,
+  "sourceChannels": 2,
+  "sourceDurationSeconds": 207.0987755102041,
+  "targetSampleRateHz": 352800,
+  "writeWav": false,
+  "outputDir": "C:\\aonsoku\\native\\engine\\offline-lab-tui-1774629143",
+  "notes": [
+    "Target sample rate was normalized from 384000 Hz to 352800 Hz to match source family (44100 Hz).",
+    "Decoder backend: symphonia",
+    "Oversampling engine for 'sinc-ultra-apod': fft-ola",
+    "Oversampling params for 'sinc-ultra-apod': engine=fft-ola sincLen=4096 cutoff=0.488000 osf=8 chunkFrames=4096",
+    "[impulse:sinc-ultra-apod] Oversampling engine for 'sinc-ultra-apod': fft-ola",
+    "[impulse:sinc-ultra-apod] Oversampling params for 'sinc-ultra-apod': engine=fft-ola sincLen=4096 cutoff=0.488000 osf=8 chunkFrames=4096"
+  ],
+  "cases": [
+    {
+      "filterToken": "sinc-ultra-apod",
+      "filterId": "sinc-ultra-apod",
+      "profileLabel": "sinc-ultra-apod",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "fft-ola",
+      "frames": 73097208,
+      "durationSeconds": 207.19163265306122,
+      "processingTimeMs": 1282.3945999999999,
+      "peakDbfs": 0.025426257758933368,
+      "truePeakDbfs": 0.025426257758933368,
+      "rmsDbfs": -11.976752640631755,
+      "crestFactorDb": 12.002178898390689,
+      "clipSamples": 2,
+      "clipRatio": 1.3680413074053389e-8,
+      "wavPath": null
+    }
+  ],
+  "comparisons": [],
+  "selfNulls": [
+    {
+      "filterToken": "sinc-ultra-apod",
+      "outputSampleRateHz": 352800,
+      "lagFrames": 0,
+      "overlapFrames": 73097208,
+      "residualPeakDbfs": null,
+      "residualRmsDbfs": null,
+      "residualRmsRelativeDb": null,
+      "residualRmsRelativeDbGainMatched": null,
+      "gainMatchedSnrDb": null,
+      "bitExact": true
+    }
+  ],
+  "impulseAnalyses": [
+    {
+      "filterToken": "sinc-ultra-apod",
+      "filterId": "sinc-ultra-apod",
+      "profileLabel": "sinc-ultra-apod",
+      "outputSampleRateHz": 352800,
+      "channels": 2,
+      "oversamplingEngine": "fft-ola",
+      "impulseInputFrames": 131072,
+      "impulseOutputFrames": 1081336,
+      "fftSize": 2097152,
+      "effectiveNyquistHz": 22050.0,
+      "passbandEndHz": 20947.5,
+      "passbandPeakDb": 17.04959926514224,
+      "stopbandStartHz": 22050.0,
+      "stopbandEndHz": 176400.0,
+      "stopbandPeakHz": 22090.711212158203,
+      "stopbandPeakDb": -121.74854856265009,
+      "stopbandAttenuationDb": -138.79814782779232,
+      "stopbandMedianDb": -135.47921673241643,
+      "stopbandP95Db": -129.00519233053794,
+      "stopbandMedianAttenuationDb": -152.52881599755867,
+      "stopbandP95AttenuationDb": -146.05479159568017,
+      "impulseWavPath": null,
+      "impulsePlotPath": "C:\\aonsoku\\native\\engine\\offline-lab-tui-1774629143\\impulse-spectrum-sinc-ultra-apod.svg"
+    }
+  ]
+}

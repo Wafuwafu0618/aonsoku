@@ -25,12 +25,16 @@ export {
 
 // リポジトリ
 export {
+  clearLyricsCache,
+  createLyricsLookupKey,
   clearAllTracks,
   deleteTrack,
   getAllTracks,
   getTracksCount,
   getTracksPage,
+  getLyricsCacheStats,
   getLastScanTime,
+  getMetadataValue,
   getLibraryStats,
   getTrack,
   getTrackByFilePath,
@@ -40,7 +44,13 @@ export {
   searchTracks,
   searchTracksCount,
   searchTracksPage,
+  setMetadataValue,
   setLastScanTime,
+  getLyricsByLookupKey,
+  markLyricsError,
+  markLyricsNotFound,
+  shouldRetryLyricsFetch,
+  upsertLyrics,
 } from './repository'
 // スキャナー
 export {
@@ -49,6 +59,13 @@ export {
   scanDirectories,
 } from './scanner'
 // 型定義
+export type {
+  LyricsCacheRecord,
+  LyricsCacheStats,
+  LyricsCacheSource,
+  LyricsCacheStatus,
+  LyricsLookupInput,
+} from './repository'
 export type {
   LocalTrack,
   ScanCompleteCallback,

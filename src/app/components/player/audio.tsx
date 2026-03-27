@@ -774,10 +774,7 @@ export function AudioPlayer({
             }
           }
         } else {
-          const snapshot = backend.getSnapshot()
-          if (snapshot.isPlaying || snapshot.status === 'playing') {
-            backend.pause()
-          }
+          backend.pause()
         }
       } catch (error) {
         logger.error('Audio playback failed', describeError(error))

@@ -5,10 +5,10 @@ use crate::engine::{ensure_output_mode_supported, EngineState, OutputMode, Playb
 use crate::protocol::{
     command_result_ok_value, emit_command_error, emit_response_ok, emit_simple_event,
     parse_params, LoadParams, NativeAudioDeviceInfo, NativeAudioInitializeResult,
-    SetLoopParams, SetOutputModeParams, SetPlaybackRateParams, SetVolumeParams, SidecarRequest,
-    SeekParams,
+    SeekParams, SetLoopParams, SetOutputModeParams, SetPlaybackRateParams,
+    SetRelayPcmParams, SetVolumeParams, SidecarRequest,
 };
-use crate::runtime::{AudioRuntime, LoadedAudio};
+use crate::runtime::{AudioRuntime, LoadedAudio, RemoteRelayPcmMode};
 
 pub fn handle_command(
     request: SidecarRequest,
@@ -175,6 +175,29 @@ pub fn handle_command(
                 }
 
                 emit_simple_event("deviceChanged", None, None)?;
+                emit_response_ok(&request.id, Some(command_result_ok_value()))?;
+            }
+            Err(message) => {
+                emit_command_error(&request.id, "invalid-params", &message, None)?;
+            }
+        },
+        "setRelayPcm" => match parse_params::<SetRelayPcmParams>(request.params) {
+            Ok(params) => {
+                let mode = match params.mode.as_deref().unwrap_or("tap") {
+                    "tap" => RemoteRelayPcmMode::Tap,
+                    "streamOnly" => RemoteRelayPcmMode::StreamOnly,
+                    _ => {
+                        emit_command_error(
+                            &request.id,
+                            "invalid-params",
+                            "setRelayPcm mode must be one of tap / streamOnly.",
+                            None,
+                        )?;
+                        return Ok(());
+                    }
+                };
+
+                runtime.set_remote_relay_pcm(params.enabled, mode);
                 emit_response_ok(&request.id, Some(command_result_ok_value()))?;
             }
             Err(message) => {
@@ -765,6 +788,7 @@ pub fn handle_command(
             }
         },
         "dispose" => {
+            runtime.set_remote_relay_pcm(false, RemoteRelayPcmMode::Tap);
             runtime.clear_loaded_audio();
             runtime.reset_output_device();
             if state.output_mode == OutputMode::WasapiExclusive {

@@ -44,14 +44,19 @@ function OtherBackdrop() {
 
   return (
     <div className="relative w-full h-full transition-colors duration-1000 bg-black/0">
+      <img
+        src={backgroundImage}
+        alt=""
+        className="absolute inset-0 w-full h-full min-w-full min-h-full object-cover scale-[1.35] transform-gpu origin-center z-0 transition-opacity duration-700"
+      />
       <div
-        className="absolute -inset-10 bg-cover bg-center z-0 transition-[background-image] duration-1000"
+        className="absolute inset-0 w-full h-full z-10 bg-background/45 transition-colors duration-1000"
         style={{
-          backgroundImage: `url(${backgroundImage})`,
-          filter: `blur(${bigPlayerBlur.value}px)`,
+          WebkitBackdropFilter: `blur(${bigPlayerBlur.value}px)`,
+          backdropFilter: `blur(${bigPlayerBlur.value}px)`,
         }}
       />
-      <div className="bg-background/50 absolute inset-0 w-full h-full z-0 transition-colors duration-1000" />
+      <div className="absolute inset-0 w-full h-full z-20 bg-black/25" />
     </div>
   )
 }
@@ -80,7 +85,7 @@ function MacBackdrop() {
             alt={title}
             effect="opacity"
             width="100%"
-            className="w-full bg-contain"
+            className="w-full h-full object-cover scale-[1.2] transform-gpu origin-center"
           />
         )}
       </ImageLoader>
@@ -91,6 +96,7 @@ function MacBackdrop() {
           backdropFilter: `blur(${bigPlayerBlur.value}px)`,
         }}
       />
+      <div className="absolute inset-0 z-20 bg-black/25" />
     </div>
   )
 }

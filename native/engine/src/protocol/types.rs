@@ -48,6 +48,14 @@ pub struct NativeAudioEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_seconds: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_rate_hz: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channels: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pcm_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<NativeAudioErrorPayload>,
 }
 

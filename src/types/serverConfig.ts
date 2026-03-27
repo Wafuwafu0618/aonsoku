@@ -94,7 +94,9 @@ interface IPodcasts {
 interface IAccounts {
   discord: {
     rpcEnabled: boolean
+    rpcClientId: string
     setRpcEnabled: (value: boolean) => void
+    setRpcClientId: (value: string) => void
   }
 }
 
@@ -104,9 +106,21 @@ interface IAccounts {
 interface IDesktop {
   data: {
     minimizeToTray: boolean
+    remoteRelay: {
+      enabled: boolean
+      localPort: number
+      cloudflaredPath: string
+      tunnelArgs: string
+      defaultProfile: 'alac' | 'aac'
+    }
   }
   actions: {
     setMinimizeToTray: (value: boolean) => void
+    setRemoteRelayEnabled: (value: boolean) => void
+    setRemoteRelayLocalPort: (value: number) => void
+    setRemoteRelayCloudflaredPath: (value: string) => void
+    setRemoteRelayTunnelArgs: (value: string) => void
+    setRemoteRelayDefaultProfile: (value: 'alac' | 'aac') => void
   }
 }
 

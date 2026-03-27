@@ -38,6 +38,14 @@ export {
   spotifyConnectStartReceiver,
   spotifyConnectStatus,
 } from './adapters/spotify-connect-adapter'
+export {
+  onRemoteRelayCommand,
+  onRemoteRelayLifecycle,
+  remoteRelayGetStatus,
+  remoteRelayStartTunnel,
+  remoteRelayStopTunnel,
+  remoteRelayUpdateState,
+} from './adapters/remote-relay-adapter'
 
 // Player Adapter
 export {

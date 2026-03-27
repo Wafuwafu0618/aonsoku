@@ -40,12 +40,12 @@ export function FullscreenProgress() {
 
   return (
     <div className="flex items-center gap-3">
-      <div className="min-w-[50px] max-w-[60px] text-right drop-shadow-lg">
+      <div className="min-w-[50px] max-w-[60px] text-right text-xs text-muted-foreground">
         {currentTime}
       </div>
 
       <ProgressSlider
-        variant="secondary"
+        variant="default"
         defaultValue={[0]}
         value={isSeeking ? [localProgress] : [progress]}
         tooltipTransformer={convertSecondsToTime}
@@ -58,7 +58,7 @@ export function FullscreenProgress() {
         onMouseUp={handleSeekedFallback}
       />
 
-      <div className="min-w-[50px] max-w-[60px] text-left drop-shadow-lg">
+      <div className="min-w-[50px] max-w-[60px] text-left text-xs text-muted-foreground">
         {convertSecondsToTime(currentDuration ?? 0)}
       </div>
     </div>

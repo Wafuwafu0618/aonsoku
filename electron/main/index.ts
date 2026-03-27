@@ -2,6 +2,7 @@ import { electronApp, optimizer, platform } from '@electron-toolkit/utils'
 import { app } from 'electron'
 import { createAppMenu } from './core/menu'
 import { nativeAudioSidecar } from './core/native-audio-sidecar'
+import { remoteRelayManager } from './core/remote-relay-manager'
 import { spotifyConnectSidecar } from './core/spotify-connect-sidecar'
 import { initAutoUpdater } from './core/updater'
 import { createWindow, mainWindow } from './window'
@@ -72,6 +73,9 @@ if (!instanceLock) {
     })
     spotifyConnectSidecar.shutdown().catch((error) => {
       console.error('[SpotifyConnectSidecar] shutdown failed:', error)
+    })
+    remoteRelayManager.shutdown().catch((error) => {
+      console.error('[RemoteRelay] shutdown failed:', error)
     })
   })
 

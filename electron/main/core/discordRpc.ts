@@ -7,11 +7,12 @@ export type RpcPayload = {
   startTime: number
   endTime: number
   duration: number
+  clientId?: string
 }
 
 export async function setDiscordRpcActivity(payload: RpcPayload) {
   try {
-    RPC.init()
+    RPC.init(payload.clientId)
     RPC.set({
       details: payload.trackName,
       state: `${payload.artist} • ${payload.albumName}`,
@@ -24,7 +25,9 @@ export async function setDiscordRpcActivity(payload: RpcPayload) {
         small_image: DEFAULT_SMALL_IMAGE,
       },
     })
-  } catch {}
+  } catch (error) {
+    console.error('[DiscordRPC] Failed to update activity:', error)
+  }
 }
 
 export function clearDiscordRpcActivity() {

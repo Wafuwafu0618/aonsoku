@@ -52,13 +52,13 @@ async function getTopSongs(artistName: string) {
   return response?.data.topSongs.song
 }
 
-async function getAllSongs(songCount: number) {
+async function getAllSongs(songCount: number, songOffset = 0) {
   const response = await search.get({
     query: '',
     albumCount: 0,
     artistCount: 0,
     songCount,
-    songOffset: 0,
+    songOffset,
   })
 
   return response?.song ?? []

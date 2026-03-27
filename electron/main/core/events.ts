@@ -5,22 +5,23 @@ import { is, platform } from '@electron-toolkit/utils'
 import {
   BrowserWindow,
   dialog,
+  session as electronSession,
   ipcMain,
   nativeTheme,
-  session as electronSession,
-  shell,
   type Session,
+  shell,
 } from 'electron'
 import {
   AppleMusicRequestDebug,
   AppleMusicWrapperConfig,
   AppleMusicWrapperStartLoginRequest,
+  BackgroundImageFileEntry,
   IpcChannels,
   LocalLibraryFileEntry,
   OverlayColors,
-  BackgroundImageFileEntry,
   ParametricEqFileEntry,
   PlayerStatePayload,
+  RemoteRelayStateUpdatePayload,
   SpotifyConnectOAuthAuthorizeRequest,
   SpotifyConnectOAuthRefreshRequest,
   SpotifyConnectPlayUriRequest,
@@ -28,28 +29,12 @@ import {
 } from '../../preload/types'
 import { isQuitting } from '../index'
 import { tray, updateTray } from '../tray'
-import { colorsState } from './colors'
-import {
-  clearDiscordRpcActivity,
-  RpcPayload,
-  setDiscordRpcActivity,
-} from './discordRpc'
-import { nativeAudioSidecar } from './native-audio-sidecar'
-import {
-  spotifyConnectOAuthAuthorize,
-  spotifyConnectOAuthRefresh,
-} from './spotify-connect-oauth'
-import { spotifyConnectSidecar } from './spotify-connect-sidecar'
-import { playerState } from './playerState'
-import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
-import { setTaskbarButtons } from './taskbar'
-import { DEFAULT_TITLE_BAR_HEIGHT } from './titleBarOverlay'
-import { resolveAppleMusicTrack } from './apple-music-pipeline'
 import {
   getAppleMusicDebugReport,
   invokeAppleMusicApi,
   openAppleMusicSignInWindow,
 } from './apple-music-browser-api'
+import { resolveAppleMusicTrack } from './apple-music-pipeline'
 import {
   buildAppleMusicWrapperImage,
   getAppleMusicWrapperLogs,
@@ -61,6 +46,23 @@ import {
   stopAppleMusicWrapperService,
   submitAppleMusicWrapperTwoFactorCode,
 } from './apple-music-wrapper-runtime'
+import { colorsState } from './colors'
+import {
+  clearDiscordRpcActivity,
+  RpcPayload,
+  setDiscordRpcActivity,
+} from './discordRpc'
+import { nativeAudioSidecar } from './native-audio-sidecar'
+import { playerState } from './playerState'
+import { remoteRelayManager } from './remote-relay-manager'
+import { getAppSetting, ISettingPayload, saveAppSettings } from './settings'
+import {
+  spotifyConnectOAuthAuthorize,
+  spotifyConnectOAuthRefresh,
+} from './spotify-connect-oauth'
+import { spotifyConnectSidecar } from './spotify-connect-sidecar'
+import { setTaskbarButtons } from './taskbar'
+import { DEFAULT_TITLE_BAR_HEIGHT } from './titleBarOverlay'
 import { setWrapperConfig } from './wrapper-client'
 
 const MUSIC_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.alac'])
@@ -76,7 +78,9 @@ function isMusicFile(path: string): boolean {
   return MUSIC_EXTENSIONS.has(extname(path).toLowerCase())
 }
 
-function normalizeHeaderValue(value: string | string[] | undefined): string | null {
+function normalizeHeaderValue(
+  value: string | string[] | undefined,
+): string | null {
   if (typeof value === 'string') {
     const normalized = value.trim()
     return normalized.length > 0 ? normalized : null
@@ -117,7 +121,10 @@ function sanitizeHeaderValue(key: string, value: string): string {
     if (!matched) return '[redacted]'
     return `Bearer ${maskToken(matched[1]?.trim() ?? '')}`
   }
-  if (normalizedKey === 'media-user-token' || normalizedKey === 'music-user-token') {
+  if (
+    normalizedKey === 'media-user-token' ||
+    normalizedKey === 'music-user-token'
+  ) {
     return maskToken(value)
   }
   if (normalizedKey === 'cookie' || normalizedKey === 'set-cookie') {
@@ -176,8 +183,14 @@ function setupAppleMusicRequestDebug(targetSession: Session): void {
       }
       const isAppleMusicApiRequest = isAppleMusicApiRequestUrl(details.url)
       if (isAppleMusicApiRequest) {
-        const musicUserToken = readHeaderValue(requestHeaders, 'music-user-token')
-        const mediaUserToken = readHeaderValue(requestHeaders, 'media-user-token')
+        const musicUserToken = readHeaderValue(
+          requestHeaders,
+          'music-user-token',
+        )
+        const mediaUserToken = readHeaderValue(
+          requestHeaders,
+          'media-user-token',
+        )
         if (!musicUserToken && mediaUserToken) {
           requestHeaders['Music-User-Token'] = mediaUserToken
         }
@@ -201,29 +214,35 @@ function setupAppleMusicRequestDebug(targetSession: Session): void {
     },
   )
 
-  targetSession.webRequest.onCompleted(APPLE_MUSIC_REQUEST_FILTER, (details) => {
-    const pending = appleMusicRequestDebugById.get(details.id)
-    if (!pending) return
+  targetSession.webRequest.onCompleted(
+    APPLE_MUSIC_REQUEST_FILTER,
+    (details) => {
+      const pending = appleMusicRequestDebugById.get(details.id)
+      if (!pending) return
 
-    const completed: AppleMusicRequestDebug = {
-      ...pending,
-      statusCode: details.statusCode,
-    }
+      const completed: AppleMusicRequestDebug = {
+        ...pending,
+        statusCode: details.statusCode,
+      }
 
-    lastAppleMusicRequestDebug = completed
-    appleMusicRequestDebugById.delete(details.id)
-  })
+      lastAppleMusicRequestDebug = completed
+      appleMusicRequestDebugById.delete(details.id)
+    },
+  )
 
-  targetSession.webRequest.onErrorOccurred(APPLE_MUSIC_REQUEST_FILTER, (details) => {
-    const pending = appleMusicRequestDebugById.get(details.id)
-    if (!pending) return
+  targetSession.webRequest.onErrorOccurred(
+    APPLE_MUSIC_REQUEST_FILTER,
+    (details) => {
+      const pending = appleMusicRequestDebugById.get(details.id)
+      if (!pending) return
 
-    lastAppleMusicRequestDebug = {
-      ...pending,
-      statusCode: -1,
-    }
-    appleMusicRequestDebugById.delete(details.id)
-  })
+      lastAppleMusicRequestDebug = {
+        ...pending,
+        statusCode: -1,
+      }
+      appleMusicRequestDebugById.delete(details.id)
+    },
+  )
 }
 
 function getFileEntryKey(path: string): string {
@@ -357,12 +376,17 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   if (!window) return
 
   ipcMain.removeAllListeners()
+  remoteRelayManager.setWindow(window)
   setupAppleMusicRequestDebug(window.webContents.session)
   setupAppleMusicRequestDebug(
     electronSession.fromPartition(APPLE_MUSIC_AUTH_PARTITION),
   )
 
   nativeAudioSidecar.setEventListener((event) => {
+    remoteRelayManager.handleNativeAudioEvent(event)
+    if (event.type === 'relayPcmChunk' || event.type === 'relayPcmFormat') {
+      return
+    }
     if (window.isDestroyed()) return
     window.webContents.send(IpcChannels.NativeAudioEvent, event)
   })
@@ -434,16 +458,42 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   )
 
   ipcMain.on(IpcChannels.SetDiscordRpcActivity, (_, payload: RpcPayload) => {
+    console.log(
+      `[DiscordRPC] IPC set activity track="${payload.trackName}" clientId=${payload.clientId ? 'configured' : 'unset'}`,
+    )
     setDiscordRpcActivity(payload)
   })
 
   ipcMain.on(IpcChannels.ClearDiscordRpcActivity, () => {
+    console.log('[DiscordRPC] IPC clear activity')
     clearDiscordRpcActivity()
   })
 
   ipcMain.on(IpcChannels.SaveAppSettings, (_, payload: ISettingPayload) => {
     saveAppSettings(payload)
   })
+
+  ipcMain.on(
+    IpcChannels.RemoteRelayStateUpdate,
+    (_, payload: RemoteRelayStateUpdatePayload) => {
+      remoteRelayManager.handleRendererStateUpdate(payload)
+    },
+  )
+
+  ipcMain.removeHandler(IpcChannels.RemoteRelayGetStatus)
+  ipcMain.handle(IpcChannels.RemoteRelayGetStatus, () =>
+    remoteRelayManager.getStatus(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.RemoteRelayStartTunnel)
+  ipcMain.handle(IpcChannels.RemoteRelayStartTunnel, () =>
+    remoteRelayManager.startTunnel(),
+  )
+
+  ipcMain.removeHandler(IpcChannels.RemoteRelayStopTunnel)
+  ipcMain.handle(IpcChannels.RemoteRelayStopTunnel, () =>
+    remoteRelayManager.stopTunnel(),
+  )
 
   ipcMain.removeHandler(IpcChannels.PickLocalLibraryDirectory)
   ipcMain.handle(IpcChannels.PickLocalLibraryDirectory, async () => {
@@ -601,11 +651,14 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   ipcMain.removeHandler(IpcChannels.NativeAudioSetPlaybackRate)
   ipcMain.handle(
     IpcChannels.NativeAudioSetPlaybackRate,
-    (_, playbackRate: number) => nativeAudioSidecar.setPlaybackRate(playbackRate),
+    (_, playbackRate: number) =>
+      nativeAudioSidecar.setPlaybackRate(playbackRate),
   )
 
   ipcMain.removeHandler(IpcChannels.NativeAudioDispose)
-  ipcMain.handle(IpcChannels.NativeAudioDispose, () => nativeAudioSidecar.dispose())
+  ipcMain.handle(IpcChannels.NativeAudioDispose, () =>
+    nativeAudioSidecar.dispose(),
+  )
 
   ipcMain.removeHandler(IpcChannels.SpotifyConnectInitialize)
   ipcMain.handle(IpcChannels.SpotifyConnectInitialize, (_, payload) =>
@@ -661,9 +714,8 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   )
 
   ipcMain.removeHandler(IpcChannels.AppleMusicResolve)
-  ipcMain.handle(
-    IpcChannels.AppleMusicResolve,
-    (_, adamId: string) => resolveAppleMusicTrack(adamId),
+  ipcMain.handle(IpcChannels.AppleMusicResolve, (_, adamId: string) =>
+    resolveAppleMusicTrack(adamId),
   )
 
   ipcMain.removeHandler(IpcChannels.AppleMusicSetWrapperConfig)
@@ -702,8 +754,9 @@ export function setupIpcEvents(window: BrowserWindow | null) {
   )
 
   ipcMain.removeHandler(IpcChannels.AppleMusicWrapperSubmitTwoFactorCode)
-  ipcMain.handle(IpcChannels.AppleMusicWrapperSubmitTwoFactorCode, (_, code: string) =>
-    submitAppleMusicWrapperTwoFactorCode(code),
+  ipcMain.handle(
+    IpcChannels.AppleMusicWrapperSubmitTwoFactorCode,
+    (_, code: string) => submitAppleMusicWrapperTwoFactorCode(code),
   )
 
   ipcMain.removeHandler(IpcChannels.AppleMusicWrapperGetStatus)

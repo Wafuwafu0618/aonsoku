@@ -38,7 +38,6 @@ export function FullscreenControls() {
       <Button
         size="icon"
         variant="ghost"
-        data-state={isShuffleActive && 'active'}
         className={clsx(
           buttonsStyle.secondary,
           isShuffleActive && buttonsStyle.activeDot,
@@ -47,7 +46,12 @@ export function FullscreenControls() {
         onClick={() => toggleShuffle()}
         disabled={isPlayingOneSong() || !hasNext}
       >
-        <Shuffle className={buttonsStyle.secondaryIcon} />
+        <Shuffle
+          className={clsx(
+            buttonsStyle.secondaryIcon,
+            'text-white',
+          )}
+        />
       </Button>
       <Button
         size="icon"
@@ -61,7 +65,7 @@ export function FullscreenControls() {
       </Button>
       <Button
         size="icon"
-        variant="link"
+        variant="default"
         className={buttonsStyle.main}
         style={{ ...buttonsStyle.style }}
         onClick={() => togglePlayPause()}
@@ -85,7 +89,6 @@ export function FullscreenControls() {
       <Button
         size="icon"
         variant="ghost"
-        data-state={loopState !== LoopState.Off && 'active'}
         className={clsx(
           buttonsStyle.secondary,
           loopState !== LoopState.Off && buttonsStyle.activeDot,
@@ -94,13 +97,13 @@ export function FullscreenControls() {
         style={{ ...buttonsStyle.style }}
       >
         {loopState === LoopState.Off && (
-          <Repeat className={buttonsStyle.secondaryIcon} />
+          <Repeat className={clsx(buttonsStyle.secondaryIcon, 'text-white')} />
         )}
         {loopState === LoopState.All && (
-          <Repeat className={buttonsStyle.secondaryIcon} />
+          <Repeat className={clsx(buttonsStyle.secondaryIcon, 'text-white')} />
         )}
         {loopState === LoopState.One && (
-          <RepeatOne className={buttonsStyle.secondaryIcon} />
+          <RepeatOne className={clsx(buttonsStyle.secondaryIcon, 'text-white')} />
         )}
       </Button>
     </Fragment>
@@ -108,14 +111,15 @@ export function FullscreenControls() {
 }
 
 export const buttonsStyle = {
-  main: 'w-14 h-14 rounded-full shadow-lg bg-secondary-foreground hover:scale-105 transition-transform will-change-transform',
-  mainIcon: 'w-6 h-6 text-secondary fill-secondary',
+  main:
+    'w-14 h-14 rounded-full p-0 hover:scale-105 transition-transform will-change-transform',
+  mainIcon: 'w-6 h-6 text-primary-foreground fill-primary-foreground',
   secondary:
-    'relative w-12 h-12 rounded-full text-secondary-foreground hover:text-secondary-foreground data-[state=active]:text-primary hover:bg-transparent hover:scale-110 transition-transform will-change-transform',
-  secondaryIcon: 'w-6 h-6 drop-shadow-lg',
-  secondaryIconFilled:
-    'w-6 h-6 text-secondary-foreground fill-secondary-foreground drop-shadow-lg',
-  activeDot: 'player-button-active',
+    'relative w-12 h-12 rounded-full p-0 text-white hover:text-white hover:scale-105 transition-transform will-change-transform',
+  secondaryIcon: 'w-6 h-6 text-white',
+  secondaryIconFilled: 'w-6 h-6 text-white fill-white',
+  activeDot:
+    "after:content-['•'] after:block after:absolute after:-bottom-1 after:text-white",
   style: {
     backfaceVisibility: 'hidden' as const,
   },

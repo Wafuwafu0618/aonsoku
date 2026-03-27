@@ -3,9 +3,10 @@ mod wasapi_probe {
     use crate::audio::{ParametricEqConfig, ParametricEqProcessor};
     use crate::error::ExclusiveProbeError;
     use crate::oversampling::{self, HqResamplerProfile, OversamplingFilter};
+    use crate::protocol::{emit_relay_pcm_chunk, emit_relay_pcm_format};
     use std::ffi::c_void;
     use std::io::{Cursor, ErrorKind};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, TryRecvError, TrySendError};
     use std::sync::Arc;
     use std::thread;
@@ -55,6 +56,7 @@ mod wasapi_probe {
     const EXCLUSIVE_STOP_FADE_OUT_TIMEOUT_SECONDS: f64 = 0.25;
     const EXCLUSIVE_PERF_LOG_INTERVAL: Duration = Duration::from_secs(1);
     const EXCLUSIVE_PERF_MAX_SAMPLES_PER_INTERVAL: usize = 32_768;
+    const RELAY_PCM_TARGET_CHUNK_BYTES: usize = 128 * 1024;
 
     fn hq_pending_multiplier(profile: HqResamplerProfile, ratio: f64) -> usize {
         match profile {
@@ -1490,6 +1492,52 @@ mod wasapi_probe {
         }
     }
 
+    fn append_relay_pcm_bytes_s16_stereo(
+        out: &mut Vec<u8>,
+        samples: &[f32],
+        frames_to_write: usize,
+        channels: usize,
+        gain: f32,
+    ) {
+        if frames_to_write == 0 || channels == 0 {
+            return;
+        }
+
+        let sample_count = frames_to_write.saturating_mul(channels);
+        let source = if samples.len() >= sample_count {
+            &samples[..sample_count]
+        } else {
+            samples
+        };
+        if source.is_empty() {
+            return;
+        }
+
+        for frame_index in 0..frames_to_write {
+            let base = frame_index.saturating_mul(channels);
+            if base >= source.len() {
+                break;
+            }
+
+            let left = (source[base] * gain).clamp(-1.0, 1.0);
+            let right = if channels >= 2 {
+                let right_index = base.saturating_add(1);
+                if right_index < source.len() {
+                    (source[right_index] * gain).clamp(-1.0, 1.0)
+                } else {
+                    left
+                }
+            } else {
+                left
+            };
+
+            let left_i16 = (left * i16::MAX as f32) as i16;
+            let right_i16 = (right * i16::MAX as f32) as i16;
+            out.extend_from_slice(&left_i16.to_le_bytes());
+            out.extend_from_slice(&right_i16.to_le_bytes());
+        }
+    }
+
     fn write_stop_fade_out(
         audio_client: &IAudioClient,
         render_client: &IAudioRenderClient,
@@ -1600,6 +1648,8 @@ mod wasapi_probe {
         oversampling_filter_id: Option<String>,
         parametric_eq: Option<ParametricEqConfig>,
         stop_receiver: Receiver<()>,
+        relay_pcm_enabled_flag: Arc<AtomicBool>,
+        relay_pcm_mode_flag: Arc<AtomicU8>,
     ) -> Result<bool, ExclusiveProbeError> {
         started_flag.store(false, Ordering::Relaxed);
         unsafe {
@@ -1838,6 +1888,12 @@ mod wasapi_probe {
                 if parametric_eq_enabled {
                     conversion_path_label.push_str("+parametric-eq");
                 }
+                let relay_stream_sample_rate_hz = sample_rate;
+                let relay_stream_channels = 2u16;
+                let relay_stream_format = "s16le";
+                let relay_gain = resample_pre_gain * volume;
+                let mut relay_chunk_bytes = Vec::<u8>::with_capacity(RELAY_PCM_TARGET_CHUNK_BYTES);
+                let mut relay_format_emitted = false;
                 eprintln!(
                     "[NativeAudioSidecar] exclusive conversion path: {}{}",
                     conversion_path_label,
@@ -2304,6 +2360,10 @@ mod wasapi_probe {
                         )
                     })?;
 
+                    let relay_stream_only_now =
+                        relay_pcm_mode_flag.load(Ordering::Relaxed) == 1;
+                    let render_volume = if relay_stream_only_now { 0.0 } else { volume };
+
                     write_render_frames(
                         initial_buffer_ptr,
                         initial_frames_to_write,
@@ -2311,10 +2371,42 @@ mod wasapi_probe {
                         sample_format,
                         &pending_samples[pending_start..pending_start + initial_samples_to_write],
                         resample_pre_gain,
-                        volume,
+                        render_volume,
                         Some(&mut startup_fade_in),
                         None,
                     );
+
+                    let relay_enabled_now = relay_pcm_enabled_flag.load(Ordering::Relaxed);
+                    if relay_enabled_now {
+                        if !relay_format_emitted {
+                            let _ = emit_relay_pcm_format(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                            );
+                            relay_format_emitted = true;
+                        }
+                        append_relay_pcm_bytes_s16_stereo(
+                            &mut relay_chunk_bytes,
+                            &pending_samples
+                                [pending_start..pending_start + initial_samples_to_write],
+                            initial_frames_to_write,
+                            channels,
+                            relay_gain,
+                        );
+                        if relay_chunk_bytes.len() >= RELAY_PCM_TARGET_CHUNK_BYTES {
+                            let _ = emit_relay_pcm_chunk(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                                &relay_chunk_bytes,
+                            );
+                            relay_chunk_bytes.clear();
+                        }
+                    } else {
+                        relay_format_emitted = false;
+                        relay_chunk_bytes.clear();
+                    }
 
                     render_client
                         .ReleaseBuffer(initial_frames_to_write as u32, 0)
@@ -2355,13 +2447,17 @@ mod wasapi_probe {
                 let mut underrun_window_open = false;
                 loop {
                     if stop_receiver.try_recv().is_ok() {
+                        let relay_stream_only_now =
+                            relay_pcm_mode_flag.load(Ordering::Relaxed) == 1;
+                        let render_volume =
+                            if relay_stream_only_now { 0.0 } else { volume };
                         match write_stop_fade_out(
                             &audio_client,
                             &render_client,
                             channels,
                             sample_format,
                             resample_pre_gain,
-                            volume,
+                            render_volume,
                             sample_rate,
                             buffer_frame_count as usize,
                             &mut pending_samples,
@@ -2388,6 +2484,15 @@ mod wasapi_probe {
                             underrun_observations,
                             &conversion_path_label,
                         );
+                        if relay_format_emitted && !relay_chunk_bytes.is_empty() {
+                            let _ = emit_relay_pcm_chunk(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                                &relay_chunk_bytes,
+                            );
+                            relay_chunk_bytes.clear();
+                        }
                         producer_guard.stop_and_join();
                         eprintln!(
                             "[NativeAudioSidecar][M0] exclusive-render-summary conversionPath={} underrunCount={} endedNaturally=false",
@@ -2441,6 +2546,15 @@ mod wasapi_probe {
                             underrun_observations,
                             &conversion_path_label,
                         );
+                        if relay_format_emitted && !relay_chunk_bytes.is_empty() {
+                            let _ = emit_relay_pcm_chunk(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                                &relay_chunk_bytes,
+                            );
+                            relay_chunk_bytes.clear();
+                        }
                         producer_guard.stop_and_join();
                         eprintln!(
                             "[NativeAudioSidecar][M0] exclusive-render-summary conversionPath={} underrunCount={} endedNaturally=true",
@@ -2516,6 +2630,10 @@ mod wasapi_probe {
                         }
                     };
 
+                    let relay_stream_only_now =
+                        relay_pcm_mode_flag.load(Ordering::Relaxed) == 1;
+                    let render_volume = if relay_stream_only_now { 0.0 } else { volume };
+
                     write_render_frames(
                         buffer_ptr,
                         frames_to_write,
@@ -2523,10 +2641,41 @@ mod wasapi_probe {
                         sample_format,
                         &pending_samples[pending_start..pending_start + writable_samples],
                         resample_pre_gain,
-                        volume,
+                        render_volume,
                         Some(&mut startup_fade_in),
                         None,
                     );
+
+                    let relay_enabled_now = relay_pcm_enabled_flag.load(Ordering::Relaxed);
+                    if relay_enabled_now {
+                        if !relay_format_emitted {
+                            let _ = emit_relay_pcm_format(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                            );
+                            relay_format_emitted = true;
+                        }
+                        append_relay_pcm_bytes_s16_stereo(
+                            &mut relay_chunk_bytes,
+                            &pending_samples[pending_start..pending_start + writable_samples],
+                            frames_to_write,
+                            channels,
+                            relay_gain,
+                        );
+                        if relay_chunk_bytes.len() >= RELAY_PCM_TARGET_CHUNK_BYTES {
+                            let _ = emit_relay_pcm_chunk(
+                                relay_stream_sample_rate_hz,
+                                relay_stream_channels,
+                                relay_stream_format,
+                                &relay_chunk_bytes,
+                            );
+                            relay_chunk_bytes.clear();
+                        }
+                    } else {
+                        relay_format_emitted = false;
+                        relay_chunk_bytes.clear();
+                    }
 
                     render_client
                         .ReleaseBuffer(frames_to_write as u32, 0)
@@ -2589,7 +2738,7 @@ mod wasapi_probe {
 mod wasapi_probe {
     use crate::audio::ParametricEqConfig;
     use crate::error::ExclusiveProbeError;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicU8};
     use std::sync::mpsc::Receiver;
     use std::sync::Arc;
 
@@ -2611,6 +2760,8 @@ mod wasapi_probe {
         _oversampling_filter_id: Option<String>,
         _parametric_eq: Option<ParametricEqConfig>,
         _stop_receiver: Receiver<()>,
+        _relay_pcm_enabled_flag: Arc<AtomicBool>,
+        _relay_pcm_mode_flag: Arc<AtomicU8>,
     ) -> Result<bool, ExclusiveProbeError> {
         Err(ExclusiveProbeError {
             code: "exclusive-open-unsupported",

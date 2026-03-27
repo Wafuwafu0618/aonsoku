@@ -14,7 +14,7 @@ export function CloseFullscreenButton() {
       style={{ ...buttonsStyle.style }}
       onClick={() => setIsFullscreen(false)}
     >
-      <ChevronDown className="size-9 drop-shadow-lg" strokeWidth={1.5} />
+      <ChevronDown className="size-9" strokeWidth={1.5} />
     </Button>
   )
 }

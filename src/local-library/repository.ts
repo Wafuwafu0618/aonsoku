@@ -9,19 +9,75 @@
 import type { LocalTrack } from './types'
 
 const DB_NAME = 'AonsokuLocalLibrary'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 const STORES = {
   TRACKS: 'tracks',
   FILE_PATHS: 'filePaths',
   SEARCH_INDEX: 'searchIndex',
   METADATA: 'metadata',
+  LYRICS: 'lyrics',
 } as const
 
 export interface TrackPageResult {
   tracks: LocalTrack[]
   total: number
 }
+
+export type LyricsCacheStatus = 'found' | 'not_found' | 'error'
+export type LyricsCacheSource = 'lrclib' | 'subsonic'
+
+export interface LyricsLookupInput {
+  artist: string
+  title: string
+  album?: string
+  duration?: number
+  preferSyncedLyrics: boolean
+  songLyricsEnabled: boolean
+}
+
+export interface LyricsCacheRecord {
+  lookupKey: string
+  trackId?: string
+  artist: string
+  title: string
+  album?: string
+  duration?: number
+  preferSyncedLyrics: boolean
+  songLyricsEnabled: boolean
+  status: LyricsCacheStatus
+  value?: string
+  synced?: boolean
+  source?: LyricsCacheSource
+  failureCount: number
+  nextRetryAt: number
+  updatedAt: number
+  lastError?: string
+}
+
+export interface LyricsCacheStats {
+  total: number
+  found: number
+  notFound: number
+  error: number
+}
+
+interface LyricsCacheMutationInput extends LyricsLookupInput {
+  lookupKey?: string
+  trackId?: string
+}
+
+interface MarkLyricsErrorInput extends LyricsCacheMutationInput {
+  errorMessage: string
+}
+
+const LYRICS_NOT_FOUND_RETRY_MS = 24 * 60 * 60 * 1000
+const LYRICS_ERROR_BACKOFF_MS = [
+  5 * 60 * 1000,
+  30 * 60 * 1000,
+  6 * 60 * 60 * 1000,
+  24 * 60 * 60 * 1000,
+] as const
 
 async function getDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -69,6 +125,16 @@ async function getDB(): Promise<IDBDatabase> {
         db.createObjectStore(STORES.METADATA, {
           keyPath: 'key',
         })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.LYRICS)) {
+        const lyricsStore = db.createObjectStore(STORES.LYRICS, {
+          keyPath: 'lookupKey',
+        })
+        lyricsStore.createIndex('status', 'status', { unique: false })
+        lyricsStore.createIndex('updatedAt', 'updatedAt', { unique: false })
+        lyricsStore.createIndex('nextRetryAt', 'nextRetryAt', { unique: false })
+        lyricsStore.createIndex('trackId', 'trackId', { unique: false })
       }
     }
   })
@@ -553,4 +619,211 @@ export async function setLastScanTime(timestamp: number): Promise<void> {
       value: timestamp,
     })
   })
+}
+
+export async function getMetadataValue<T = unknown>(
+  key: string,
+): Promise<T | undefined> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.METADATA, 'readonly')
+
+  return new Promise((resolve, reject) => {
+    const store = transaction.objectStore(STORES.METADATA)
+    const request = store.get(key)
+
+    request.onsuccess = () => {
+      resolve(request.result?.value as T | undefined)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+export async function setMetadataValue(
+  key: string,
+  value: unknown,
+): Promise<void> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.METADATA, 'readwrite')
+
+  return new Promise((resolve, reject) => {
+    transaction.onerror = () => reject(transaction.error)
+    transaction.oncomplete = () => resolve()
+
+    const store = transaction.objectStore(STORES.METADATA)
+    store.put({
+      key,
+      value,
+    })
+  })
+}
+
+function normalizeLyricsLookupText(value: string | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function normalizeLyricsLookupDuration(duration: number | undefined): string {
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+    return ''
+  }
+
+  return String(Math.round(duration))
+}
+
+function encodeLyricsLookupPart(value: string): string {
+  return encodeURIComponent(value)
+}
+
+function getLyricsErrorBackoffMs(failureCount: number): number {
+  const normalizedCount = Math.max(1, failureCount)
+  const index = Math.min(
+    LYRICS_ERROR_BACKOFF_MS.length - 1,
+    normalizedCount - 1,
+  )
+  return LYRICS_ERROR_BACKOFF_MS[index]
+}
+
+export function createLyricsLookupKey(input: LyricsLookupInput): string {
+  const parts = [
+    'lyrics',
+    normalizeLyricsLookupText(input.artist),
+    normalizeLyricsLookupText(input.title),
+    normalizeLyricsLookupText(input.album),
+    normalizeLyricsLookupDuration(input.duration),
+    input.preferSyncedLyrics ? 'synced' : 'plain',
+    input.songLyricsEnabled ? 'internal' : 'external',
+  ]
+
+  return parts.map(encodeLyricsLookupPart).join(':')
+}
+
+export async function getLyricsByLookupKey(
+  lookupKey: string,
+): Promise<LyricsCacheRecord | undefined> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.LYRICS, 'readonly')
+
+  return new Promise((resolve, reject) => {
+    const store = transaction.objectStore(STORES.LYRICS)
+    const request = store.get(lookupKey)
+
+    request.onsuccess = () =>
+      resolve(request.result as LyricsCacheRecord | undefined)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+export async function upsertLyrics(record: LyricsCacheRecord): Promise<void> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.LYRICS, 'readwrite')
+
+  return new Promise((resolve, reject) => {
+    transaction.onerror = () => reject(transaction.error)
+    transaction.oncomplete = () => resolve()
+
+    const store = transaction.objectStore(STORES.LYRICS)
+    store.put(record)
+  })
+}
+
+export async function markLyricsNotFound(
+  input: LyricsCacheMutationInput,
+): Promise<void> {
+  const lookupKey = input.lookupKey ?? createLyricsLookupKey(input)
+  const previousRecord = await getLyricsByLookupKey(lookupKey)
+  const now = Date.now()
+
+  await upsertLyrics({
+    lookupKey,
+    trackId: input.trackId ?? previousRecord?.trackId,
+    artist: input.artist,
+    title: input.title,
+    album: input.album,
+    duration: input.duration,
+    preferSyncedLyrics: input.preferSyncedLyrics,
+    songLyricsEnabled: input.songLyricsEnabled,
+    status: 'not_found',
+    failureCount: 0,
+    nextRetryAt: now + LYRICS_NOT_FOUND_RETRY_MS,
+    updatedAt: now,
+  })
+}
+
+export async function markLyricsError(
+  input: MarkLyricsErrorInput,
+): Promise<void> {
+  const lookupKey = input.lookupKey ?? createLyricsLookupKey(input)
+  const previousRecord = await getLyricsByLookupKey(lookupKey)
+  const failureCount = Math.max(1, (previousRecord?.failureCount ?? 0) + 1)
+  const now = Date.now()
+
+  await upsertLyrics({
+    lookupKey,
+    trackId: input.trackId ?? previousRecord?.trackId,
+    artist: input.artist,
+    title: input.title,
+    album: input.album,
+    duration: input.duration,
+    preferSyncedLyrics: input.preferSyncedLyrics,
+    songLyricsEnabled: input.songLyricsEnabled,
+    status: 'error',
+    failureCount,
+    nextRetryAt: now + getLyricsErrorBackoffMs(failureCount),
+    updatedAt: now,
+    lastError: input.errorMessage.trim() || 'Unknown error',
+  })
+}
+
+export function shouldRetryLyricsFetch(
+  record: LyricsCacheRecord | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!record) return true
+  if (record.status === 'found') return false
+
+  if (!Number.isFinite(record.nextRetryAt) || record.nextRetryAt <= 0) {
+    return true
+  }
+
+  return nowMs >= record.nextRetryAt
+}
+
+export async function clearLyricsCache(): Promise<void> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.LYRICS, 'readwrite')
+
+  return new Promise((resolve, reject) => {
+    transaction.onerror = () => reject(transaction.error)
+    transaction.oncomplete = () => resolve()
+
+    const store = transaction.objectStore(STORES.LYRICS)
+    store.clear()
+  })
+}
+
+export async function getLyricsCacheStats(): Promise<LyricsCacheStats> {
+  const db = await getDB()
+  const transaction = db.transaction(STORES.LYRICS, 'readonly')
+  const store = transaction.objectStore(STORES.LYRICS)
+  const statusIndex = store.index('status')
+
+  const countRequest = (source: IDBObjectStore | IDBIndex, key?: IDBValidKey) =>
+    new Promise<number>((resolve, reject) => {
+      const request = key !== undefined ? source.count(key) : source.count()
+      request.onsuccess = () => resolve(request.result ?? 0)
+      request.onerror = () => reject(request.error)
+    })
+
+  const [total, found, notFound, error] = await Promise.all([
+    countRequest(store),
+    countRequest(statusIndex, 'found'),
+    countRequest(statusIndex, 'not_found'),
+    countRequest(statusIndex, 'error'),
+  ])
+
+  return {
+    total,
+    found,
+    notFound,
+    error,
+  }
 }

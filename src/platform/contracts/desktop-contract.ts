@@ -63,6 +63,16 @@ export {
   type LocalLibraryFileEntry,
   type OverlayColors,
   type PlayerStateListenerActions,
+  type RemoteRelayCommandPayload,
+  type RemoteRelayLifecycleEvent,
+  type RemotePlaybackDevice,
+  type RemotePlaybackTarget,
+  type RemoteRelayMediaSource,
+  type RemoteRelayNowPlaying,
+  type RemoteRelayStateUpdatePayload,
+  type RemoteRelayStatus,
+  type RemoteRelayStreamProfile,
+  type RemoteRelayTunnelCommandResult,
   type PlayerStatePayload,
 } from '../../../electron/preload/types'
 
