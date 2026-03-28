@@ -1,9 +1,14 @@
 #[cfg(target_os = "windows")]
 mod wasapi_probe {
-    use crate::audio::{ParametricEqConfig, ParametricEqProcessor};
+    use crate::audio::{
+        AnalogColorConfig, AnalogColorProcessor, CrossfeedConfig, CrossfeedProcessor,
+        ParametricEqConfig, ParametricEqProcessor,
+    };
     use crate::error::ExclusiveProbeError;
     use crate::oversampling::{self, HqResamplerProfile, OversamplingFilter};
-    use crate::protocol::{emit_relay_pcm_chunk, emit_relay_pcm_format};
+    use crate::protocol::{
+        emit_dsp_meter_event, emit_relay_pcm_chunk, emit_relay_pcm_format,
+    };
     use std::ffi::c_void;
     use std::io::{Cursor, ErrorKind};
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -56,6 +61,7 @@ mod wasapi_probe {
     const EXCLUSIVE_STOP_FADE_OUT_TIMEOUT_SECONDS: f64 = 0.25;
     const EXCLUSIVE_PERF_LOG_INTERVAL: Duration = Duration::from_secs(1);
     const EXCLUSIVE_PERF_MAX_SAMPLES_PER_INTERVAL: usize = 32_768;
+    const DSP_METER_EMIT_INTERVAL: Duration = Duration::from_millis(180);
     const RELAY_PCM_TARGET_CHUNK_BYTES: usize = 128 * 1024;
 
     fn hq_pending_multiplier(profile: HqResamplerProfile, ratio: f64) -> usize {
@@ -166,6 +172,101 @@ mod wasapi_probe {
         let max_index = values.len().saturating_sub(1);
         let rank = ((clamped / 100.0) * max_index as f64).round() as usize;
         values[rank.min(max_index)]
+    }
+
+    fn db_to_linear(db: f32) -> f32 {
+        10.0_f32.powf(db / 20.0)
+    }
+
+    fn amplitude_to_dbfs(amplitude: f32) -> f32 {
+        let safe = amplitude.abs().max(1.0e-9);
+        (20.0 * safe.log10()).clamp(-120.0, 24.0)
+    }
+
+    struct ProducerMeterMonitor {
+        channels: usize,
+        output_gain: f32,
+        prev_samples: Vec<f32>,
+        has_prev_samples: Vec<bool>,
+        window_peak: f32,
+        window_true_peak: f32,
+        window_clip_count: u64,
+        total_clip_count: u64,
+        last_emitted_at: Instant,
+    }
+
+    impl ProducerMeterMonitor {
+        fn new(channels: usize, output_gain: f32) -> Self {
+            Self {
+                channels: channels.max(1),
+                output_gain,
+                prev_samples: vec![0.0; channels.max(1)],
+                has_prev_samples: vec![false; channels.max(1)],
+                window_peak: 0.0,
+                window_true_peak: 0.0,
+                window_clip_count: 0,
+                total_clip_count: 0,
+                last_emitted_at: Instant::now(),
+            }
+        }
+
+        fn observe_interleaved_samples(&mut self, samples: &[f32]) {
+            if samples.is_empty() {
+                return;
+            }
+
+            for (sample_index, sample) in samples.iter().copied().enumerate() {
+                let channel = sample_index % self.channels;
+                let value = sample * self.output_gain;
+                let abs_value = value.abs();
+                self.window_peak = self.window_peak.max(abs_value);
+                if abs_value > 1.0 {
+                    self.window_clip_count = self.window_clip_count.saturating_add(1);
+                    self.total_clip_count = self.total_clip_count.saturating_add(1);
+                }
+
+                if self.has_prev_samples[channel] {
+                    let previous = self.prev_samples[channel];
+                    for ratio in [0.25_f32, 0.5_f32, 0.75_f32] {
+                        let interpolated = previous + (value - previous) * ratio;
+                        self.window_true_peak =
+                            self.window_true_peak.max(interpolated.abs());
+                    }
+                }
+                self.window_true_peak = self.window_true_peak.max(abs_value);
+                self.prev_samples[channel] = value;
+                self.has_prev_samples[channel] = true;
+            }
+        }
+
+        fn maybe_emit(&mut self) {
+            if self.last_emitted_at.elapsed() < DSP_METER_EMIT_INTERVAL {
+                return;
+            }
+            self.emit_and_reset_window();
+        }
+
+        fn flush(&mut self) {
+            self.emit_and_reset_window();
+        }
+
+        fn emit_and_reset_window(&mut self) {
+            let peak_dbfs = amplitude_to_dbfs(self.window_peak);
+            let true_peak_dbfs = amplitude_to_dbfs(self.window_true_peak);
+            let clipping_detected = self.total_clip_count > 0;
+            let _ = emit_dsp_meter_event(
+                peak_dbfs,
+                true_peak_dbfs,
+                self.window_clip_count,
+                self.total_clip_count,
+                clipping_detected,
+            );
+
+            self.window_peak = 0.0;
+            self.window_true_peak = 0.0;
+            self.window_clip_count = 0;
+            self.last_emitted_at = Instant::now();
+        }
     }
 
     struct ExclusivePerfWindow {
@@ -555,7 +656,7 @@ mod wasapi_probe {
                     continue;
                 }
 
-                {
+                let (decoded_channels, decoded_sample_rate_hz, local_buffer) = {
                     let decoded = match self.decoder.decode(&packet) {
                         Ok(decoded) => decoded,
                         Err(SymphoniaError::DecodeError(_)) => continue,
@@ -577,18 +678,22 @@ mod wasapi_probe {
                         }
                     };
 
-                    if self.channels == 0 {
-                        self.channels = decoded.spec().channels.count() as u16;
-                    }
-                    if self.raw_sample_rate_hz == 0 {
-                        self.raw_sample_rate_hz = decoded.spec().rate;
-                        self.effective_sample_rate_hz =
-                            ((self.raw_sample_rate_hz as f64 * self.playback_rate) as u32).max(1);
-                    }
+                    (
+                        decoded.spec().channels.count() as u16,
+                        decoded.spec().rate,
+                        audio_buffer_to_f32_vec(decoded),
+                    )
+                };
 
-                    let local_buffer = audio_buffer_to_f32_vec(decoded);
-                    self.append_decoded_samples(&local_buffer);
+                if self.channels == 0 {
+                    self.channels = decoded_channels;
                 }
+                if self.raw_sample_rate_hz == 0 {
+                    self.raw_sample_rate_hz = decoded_sample_rate_hz;
+                    self.effective_sample_rate_hz =
+                        ((self.raw_sample_rate_hz as f64 * self.playback_rate) as u32).max(1);
+                }
+                self.append_decoded_samples(&local_buffer);
                 if !self.pending_samples.is_empty() {
                     return Ok(());
                 }
@@ -603,6 +708,7 @@ mod wasapi_probe {
             if interleaved.is_empty() {
                 return;
             }
+            let input = interleaved;
 
             if !self.skip_budget_initialized && self.start_at_seconds > 0.0 {
                 if self.raw_sample_rate_hz > 0 && self.channels > 0 {
@@ -617,17 +723,16 @@ mod wasapi_probe {
             }
 
             if self.remaining_skip_samples > 0 {
-                let skip = self.remaining_skip_samples.min(interleaved.len());
+                let skip = self.remaining_skip_samples.min(input.len());
                 self.remaining_skip_samples -= skip;
-                if skip >= interleaved.len() {
+                if skip >= input.len() {
                     return;
                 }
-                self.pending_samples
-                    .extend_from_slice(&interleaved[skip..]);
+                self.pending_samples.extend_from_slice(&input[skip..]);
                 return;
             }
 
-            self.pending_samples.extend_from_slice(interleaved);
+            self.pending_samples.extend_from_slice(input);
         }
     }
 
@@ -1644,9 +1749,12 @@ mod wasapi_probe {
         playback_rate: f64,
         loop_enabled: bool,
         volume: f32,
+        headroom_db: f32,
         preferred_sample_rate_hz: Option<u32>,
         oversampling_filter_id: Option<String>,
+        crossfeed: Option<CrossfeedConfig>,
         parametric_eq: Option<ParametricEqConfig>,
+        analog_color: Option<AnalogColorConfig>,
         stop_receiver: Receiver<()>,
         relay_pcm_enabled_flag: Arc<AtomicBool>,
         relay_pcm_mode_flag: Arc<AtomicU8>,
@@ -1876,6 +1984,12 @@ mod wasapi_probe {
                 } else {
                     HQ_RESAMPLER_OUTPUT_HEADROOM_GAIN
                 };
+                let normalized_headroom_db = if headroom_db.is_finite() {
+                    headroom_db.clamp(-24.0, 0.0)
+                } else {
+                    0.0
+                };
+                let headroom_linear = db_to_linear(normalized_headroom_db);
                 let parametric_eq_enabled = parametric_eq
                     .as_ref()
                     .and_then(|config| ParametricEqProcessor::new(config, channels, sample_rate))
@@ -1888,10 +2002,30 @@ mod wasapi_probe {
                 if parametric_eq_enabled {
                     conversion_path_label.push_str("+parametric-eq");
                 }
+                let crossfeed_enabled = crossfeed.is_some() && channels == 2;
+                if crossfeed_enabled {
+                    conversion_path_label.push_str("+crossfeed(os-post)");
+                } else if crossfeed.is_some() {
+                    eprintln!(
+                        "[NativeAudioSidecar] crossfeed requested but bypassed: outputChannels={} (stereo required)",
+                        channels
+                    );
+                }
+                let analog_color_enabled = analog_color.is_some();
+                if analog_color_enabled {
+                    conversion_path_label.push_str("+analog-color(low+mid-band)");
+                }
+                if normalized_headroom_db < -0.001 {
+                    conversion_path_label.push_str(&format!(
+                        "+headroom({:.1}dB)",
+                        normalized_headroom_db
+                    ));
+                }
                 let relay_stream_sample_rate_hz = sample_rate;
                 let relay_stream_channels = 2u16;
                 let relay_stream_format = "s16le";
-                let relay_gain = resample_pre_gain * volume;
+                let output_gain = resample_pre_gain * headroom_linear;
+                let relay_gain = output_gain * volume;
                 let mut relay_chunk_bytes = Vec::<u8>::with_capacity(RELAY_PCM_TARGET_CHUNK_BYTES);
                 let mut relay_format_emitted = false;
                 eprintln!(
@@ -2060,7 +2194,9 @@ mod wasapi_probe {
                 let producer_stop_flag_for_thread = Arc::clone(&producer_stop_flag);
                 let producer_audio_data = audio_data.clone();
                 let producer_filter_id = oversampling_filter_id.clone();
+                let producer_crossfeed_config = crossfeed.clone();
                 let producer_parametric_eq_config = parametric_eq.clone();
+                let producer_analog_color_config = analog_color.clone();
                 let producer_conversion_path_label = conversion_path_label.clone();
                 let producer_thread = thread::spawn(move || {
                     let make_sample_producer =
@@ -2091,6 +2227,14 @@ mod wasapi_probe {
                                 }))
                             }
                         };
+                    let make_crossfeed_processor = || -> Option<CrossfeedProcessor> {
+                        if channels != 2 {
+                            return None;
+                        }
+                        producer_crossfeed_config.as_ref().and_then(|config| {
+                            CrossfeedProcessor::new(config, sample_rate)
+                        })
+                    };
 
                     let mut sample_producer = match make_sample_producer() {
                         Ok(producer) => producer,
@@ -2103,9 +2247,15 @@ mod wasapi_probe {
                             return;
                         }
                     };
+                    let mut producer_crossfeed = make_crossfeed_processor();
                     let mut producer_parametric_eq = producer_parametric_eq_config
                         .as_ref()
                         .and_then(|config| ParametricEqProcessor::new(config, channels, sample_rate));
+                    let mut producer_analog_color = producer_analog_color_config
+                        .as_ref()
+                        .and_then(|config| AnalogColorProcessor::new(config, channels, sample_rate));
+                    let mut producer_meter =
+                        ProducerMeterMonitor::new(channels, output_gain * volume);
                     let mut producer_perf_started = Instant::now();
                     let mut producer_fill_calls = 0u64;
                     let mut producer_fill_samples = 0u64;
@@ -2222,17 +2372,32 @@ mod wasapi_probe {
                                         return;
                                     }
                                 };
+                                producer_crossfeed = make_crossfeed_processor();
                                 continue;
                             }
 
                             let _ = producer_tx.try_send(ProducerMessage::EndOfStream);
+                            producer_meter.flush();
                             return;
                         }
 
                         chunk.truncate(added_samples);
+                        if let Some(processor) = producer_crossfeed.as_mut() {
+                            for frame in chunk.chunks_exact_mut(2) {
+                                let (left, right) =
+                                    processor.process_stereo_frame(frame[0], frame[1]);
+                                frame[0] = left;
+                                frame[1] = right;
+                            }
+                        }
                         if let Some(processor) = producer_parametric_eq.as_mut() {
                             processor.process_interleaved_in_place(&mut chunk);
                         }
+                        if let Some(processor) = producer_analog_color.as_mut() {
+                            processor.process_interleaved_in_place(&mut chunk);
+                        }
+                        producer_meter.observe_interleaved_samples(&chunk);
+                        producer_meter.maybe_emit();
 
                         let mut outgoing = ProducerMessage::Samples(chunk);
                         let send_wait_started_at = Instant::now();
@@ -2370,7 +2535,7 @@ mod wasapi_probe {
                         channels,
                         sample_format,
                         &pending_samples[pending_start..pending_start + initial_samples_to_write],
-                        resample_pre_gain,
+                        output_gain,
                         render_volume,
                         Some(&mut startup_fade_in),
                         None,
@@ -2456,7 +2621,7 @@ mod wasapi_probe {
                             &render_client,
                             channels,
                             sample_format,
-                            resample_pre_gain,
+                            output_gain,
                             render_volume,
                             sample_rate,
                             buffer_frame_count as usize,
@@ -2640,7 +2805,7 @@ mod wasapi_probe {
                         channels,
                         sample_format,
                         &pending_samples[pending_start..pending_start + writable_samples],
-                        resample_pre_gain,
+                        output_gain,
                         render_volume,
                         Some(&mut startup_fade_in),
                         None,
@@ -2736,7 +2901,7 @@ mod wasapi_probe {
 
 #[cfg(not(target_os = "windows"))]
 mod wasapi_probe {
-    use crate::audio::ParametricEqConfig;
+    use crate::audio::{AnalogColorConfig, CrossfeedConfig, ParametricEqConfig};
     use crate::error::ExclusiveProbeError;
     use std::sync::atomic::{AtomicBool, AtomicU8};
     use std::sync::mpsc::Receiver;
@@ -2756,9 +2921,12 @@ mod wasapi_probe {
         _playback_rate: f64,
         _loop_enabled: bool,
         _volume: f32,
+        _headroom_db: f32,
         _preferred_sample_rate_hz: Option<u32>,
         _oversampling_filter_id: Option<String>,
+        _crossfeed: Option<CrossfeedConfig>,
         _parametric_eq: Option<ParametricEqConfig>,
+        _analog_color: Option<AnalogColorConfig>,
         _stop_receiver: Receiver<()>,
         _relay_pcm_enabled_flag: Arc<AtomicBool>,
         _relay_pcm_mode_flag: Arc<AtomicU8>,

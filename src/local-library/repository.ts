@@ -78,6 +78,7 @@ const LYRICS_ERROR_BACKOFF_MS = [
   6 * 60 * 60 * 1000,
   24 * 60 * 60 * 1000,
 ] as const
+const LYRICS_LOOKUP_KEY_VERSION = 'lyrics-v2'
 
 async function getDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -684,7 +685,7 @@ function getLyricsErrorBackoffMs(failureCount: number): number {
 
 export function createLyricsLookupKey(input: LyricsLookupInput): string {
   const parts = [
-    'lyrics',
+    LYRICS_LOOKUP_KEY_VERSION,
     normalizeLyricsLookupText(input.artist),
     normalizeLyricsLookupText(input.title),
     normalizeLyricsLookupText(input.album),

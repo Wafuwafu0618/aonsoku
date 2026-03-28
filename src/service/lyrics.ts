@@ -34,12 +34,28 @@ interface LRCLibResponse {
   id: number
   trackName: string
   artistName: string
+  albumName?: string | null
+  duration?: number | null
+  instrumental?: boolean
   plainLyrics?: string | null
   syncedLyrics?: string | null
 }
 
 interface LrclibLyricResult extends ILyric {
   synced: boolean
+  errorMessage?: string
+}
+
+interface LrclibLookupCandidate {
+  artist: string
+  title: string
+  album?: string
+  duration?: number
+}
+
+interface LrclibFetchAttemptResult {
+  status: 'found' | 'not_found' | 'error'
+  lyric?: LrclibLyricResult
   errorMessage?: string
 }
 
@@ -510,6 +526,291 @@ async function getLyrics(getLyricsData: GetLyricsData) {
   return toEmptyLyric(getLyricsData.artist, getLyricsData.title)
 }
 
+function normalizeLrclibText(value: string | undefined): string {
+  return (value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^0-9a-z\u3040-\u30ff\u3400-\u9fff\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+}
+
+function toPrimaryArtistName(artist: string): string {
+  const trimmed = artist.trim()
+  if (trimmed === '') return ''
+
+  const withoutFeature = trimmed
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
+    .trim()
+  const splitCandidates = withoutFeature.split(/\s*(?:,|&|\/|、|・|×)\s*/g)
+  const firstCandidate = splitCandidates[0]?.trim()
+
+  return firstCandidate && firstCandidate.length > 0
+    ? firstCandidate
+    : withoutFeature
+}
+
+function normalizeTrackTitleForLookup(title: string): string {
+  const withoutFeature = title
+    .replace(/\s*[-–—]?\s*(?:feat\.?|ft\.?|featuring)\s+.+$/i, '')
+    .trim()
+  const withoutTrailingBracket = withoutFeature
+    .replace(/\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$/g, '')
+    .trim()
+
+  return withoutTrailingBracket || withoutFeature || title
+}
+
+function resolveLrclibApiBaseUrl(): string {
+  const { lrclib } = usePlayerStore.getState().settings.privacy
+  const defaultBaseUrl = 'https://lrclib.net'
+
+  if (!lrclib.customUrlEnabled || lrclib.customUrl.trim() === '') {
+    return `${defaultBaseUrl}/api`
+  }
+
+  const normalizedCustomBase = lrclib.customUrl.replace(/\/+$/, '')
+  return `${normalizedCustomBase}/api`
+}
+
+function toLrclibLyricResult(
+  response: LRCLibResponse,
+  fallback: Pick<LrclibLookupCandidate, 'artist' | 'title'>,
+): LrclibLyricResult {
+  const finalLyric = response.syncedLyrics || response.plainLyrics || ''
+  const formattedLyrics = formatLyrics(finalLyric)
+
+  return {
+    artist: (response.artistName || fallback.artist).trim(),
+    title: (response.trackName || fallback.title).trim(),
+    value: formattedLyrics,
+    synced: isSyncedLyric(formattedLyrics),
+  }
+}
+
+function createLrclibLookupCandidates(
+  base: LrclibLookupCandidate,
+): LrclibLookupCandidate[] {
+  const primaryArtist = toPrimaryArtistName(base.artist)
+  const normalizedTitle = normalizeTrackTitleForLookup(base.title)
+  const candidates: LrclibLookupCandidate[] = [
+    {
+      artist: base.artist,
+      title: base.title,
+      album: base.album,
+      duration: base.duration,
+    },
+    {
+      artist: base.artist,
+      title: base.title,
+      album: base.album,
+    },
+    {
+      artist: base.artist,
+      title: base.title,
+    },
+    {
+      artist: primaryArtist || base.artist,
+      title: normalizedTitle || base.title,
+    },
+  ]
+
+  const seen = new Set<string>()
+  const deduped: LrclibLookupCandidate[] = []
+
+  for (const candidate of candidates) {
+    const key = [
+      normalizeLrclibText(candidate.artist),
+      normalizeLrclibText(candidate.title),
+      normalizeLrclibText(candidate.album),
+      typeof candidate.duration === 'number' ? String(Math.round(candidate.duration)) : '',
+    ].join('|')
+
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(candidate)
+  }
+
+  return deduped
+}
+
+async function fetchLrclibLyricsByGet(
+  apiBaseUrl: string,
+  candidate: LrclibLookupCandidate,
+): Promise<LrclibFetchAttemptResult> {
+  try {
+    incrementLyricsMetric('lrclibRequests')
+
+    const params = new URLSearchParams({
+      artist_name: candidate.artist,
+      track_name: candidate.title,
+    })
+
+    if (typeof candidate.duration === 'number' && Number.isFinite(candidate.duration)) {
+      params.append('duration', String(Math.round(candidate.duration)))
+    }
+    if (candidate.album && candidate.album.trim().length > 0) {
+      params.append('album_name', candidate.album)
+    }
+
+    const requestUrl = new URL(`${apiBaseUrl}/get`)
+    requestUrl.search = params.toString()
+
+    const request = await fetch(requestUrl.toString(), {
+      headers: {
+        'Lrclib-Client': lrclibClient,
+      },
+    })
+
+    if (request.status === 404) {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    if (!request.ok) {
+      incrementLyricsMetric('lrclibErrors')
+      return {
+        status: 'error',
+        errorMessage: `LRCLIB request failed with status ${request.status}`,
+      }
+    }
+
+    const response: LRCLibResponse = await request.json()
+    const lyric = toLrclibLyricResult(response, candidate)
+
+    if (lyric.value === '') {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    incrementLyricsMetric('lrclibHits')
+    return {
+      status: 'found',
+      lyric,
+    }
+  } catch (error) {
+    incrementLyricsMetric('lrclibErrors')
+    return {
+      status: 'error',
+      errorMessage: toErrorMessage(error),
+    }
+  }
+}
+
+function scoreLrclibSearchCandidate(
+  candidate: LRCLibResponse,
+  target: Pick<LrclibLookupCandidate, 'artist' | 'title' | 'duration'>,
+): number {
+  const normalizedCandidateArtist = normalizeLrclibText(candidate.artistName)
+  const normalizedCandidateTitle = normalizeLrclibText(candidate.trackName)
+  const normalizedTargetArtist = normalizeLrclibText(target.artist)
+  const normalizedTargetTitle = normalizeLrclibText(target.title)
+
+  let score = 0
+  if (normalizedCandidateArtist === normalizedTargetArtist) {
+    score += 5
+  } else if (
+    normalizedCandidateArtist.includes(normalizedTargetArtist) ||
+    normalizedTargetArtist.includes(normalizedCandidateArtist)
+  ) {
+    score += 3
+  }
+
+  if (normalizedCandidateTitle === normalizedTargetTitle) {
+    score += 5
+  } else if (
+    normalizedCandidateTitle.includes(normalizedTargetTitle) ||
+    normalizedTargetTitle.includes(normalizedCandidateTitle)
+  ) {
+    score += 3
+  }
+
+  if (
+    typeof target.duration === 'number' &&
+    Number.isFinite(target.duration) &&
+    typeof candidate.duration === 'number' &&
+    Number.isFinite(candidate.duration)
+  ) {
+    const durationDiff = Math.abs(Math.round(target.duration) - Math.round(candidate.duration))
+    if (durationDiff <= 2) score += 2
+    else if (durationDiff <= 5) score += 1
+  }
+
+  return score
+}
+
+async function fetchLrclibLyricsBySearch(
+  apiBaseUrl: string,
+  candidate: Pick<LrclibLookupCandidate, 'artist' | 'title' | 'duration'>,
+): Promise<LrclibFetchAttemptResult> {
+  try {
+    incrementLyricsMetric('lrclibRequests')
+
+    const params = new URLSearchParams({
+      artist_name: candidate.artist,
+      track_name: candidate.title,
+    })
+    const requestUrl = new URL(`${apiBaseUrl}/search`)
+    requestUrl.search = params.toString()
+
+    const request = await fetch(requestUrl.toString(), {
+      headers: {
+        'Lrclib-Client': lrclibClient,
+      },
+    })
+
+    if (request.status === 404) {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    if (!request.ok) {
+      incrementLyricsMetric('lrclibErrors')
+      return {
+        status: 'error',
+        errorMessage: `LRCLIB search failed with status ${request.status}`,
+      }
+    }
+
+    const response = (await request.json()) as LRCLibResponse[] | undefined
+    const candidates = Array.isArray(response) ? response : []
+    if (candidates.length === 0) {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    const bestMatch = candidates
+      .slice()
+      .sort(
+        (left, right) =>
+          scoreLrclibSearchCandidate(right, candidate) -
+          scoreLrclibSearchCandidate(left, candidate),
+      )[0]
+
+    if (!bestMatch) {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    const lyric = toLrclibLyricResult(bestMatch, candidate)
+    if (lyric.value === '') {
+      incrementLyricsMetric('lrclibNotFound')
+      return { status: 'not_found' }
+    }
+
+    incrementLyricsMetric('lrclibHits')
+    return {
+      status: 'found',
+      lyric,
+    }
+  } catch (error) {
+    incrementLyricsMetric('lrclibErrors')
+    return {
+      status: 'error',
+      errorMessage: toErrorMessage(error),
+    }
+  }
+}
+
 async function getLyricsFromLRCLib(
   getLyricsData: GetLyricsData,
 ): Promise<LrclibLyricResult> {
@@ -534,88 +835,59 @@ async function getLyricsFromLRCLib(
     }
   }
 
-  try {
-    incrementLyricsMetric('lrclibRequests')
+  const apiBaseUrl = resolveLrclibApiBaseUrl()
+  const lookupCandidates = createLrclibLookupCandidates({
+    artist,
+    title,
+    album,
+    duration,
+  })
+  let lastErrorMessage: string | undefined
 
-    const params = new URLSearchParams({
-      artist_name: artist,
-      track_name: title,
-    })
-
-    if (duration) params.append('duration', duration.toString())
-    if (album) params.append('album_name', album)
-
-    let defaultLrcLibUrl = 'https://lrclib.net/api/get'
-
-    if (lrclib.customUrlEnabled && lrclib.customUrl !== '') {
-      defaultLrcLibUrl = `${lrclib.customUrl}/api/get`
+  for (const candidate of lookupCandidates) {
+    const attempt = await fetchLrclibLyricsByGet(apiBaseUrl, candidate)
+    if (attempt.status === 'found' && attempt.lyric) {
+      return attempt.lyric
     }
-
-    const url = new URL(defaultLrcLibUrl)
-    url.search = params.toString()
-
-    const request = await fetch(url.toString(), {
-      headers: {
-        'Lrclib-Client': lrclibClient,
-      },
-    })
-
-    if (request.status === 404) {
-      incrementLyricsMetric('lrclibNotFound')
-      return {
-        artist,
-        title,
-        value: '',
-        synced: false,
-      }
-    }
-
-    if (!request.ok) {
-      incrementLyricsMetric('lrclibErrors')
-      return {
-        artist,
-        title,
-        value: '',
-        synced: false,
-        errorMessage: `LRCLIB request failed with status ${request.status}`,
-      }
-    }
-
-    const response: LRCLibResponse = await request.json()
-
-    if (response) {
-      const finalLyric = response.syncedLyrics || response.plainLyrics || ''
-      const formattedLyrics = formatLyrics(finalLyric)
-      if (formattedLyrics === '') {
-        incrementLyricsMetric('lrclibNotFound')
-      } else {
-        incrementLyricsMetric('lrclibHits')
-      }
-
-      return {
-        artist,
-        title,
-        value: formattedLyrics,
-        synced: isSyncedLyric(formattedLyrics),
-      }
-    }
-  } catch (error) {
-    incrementLyricsMetric('lrclibErrors')
-    return {
-      artist,
-      title,
-      value: '',
-      synced: false,
-      errorMessage: toErrorMessage(error),
+    if (attempt.status === 'error' && attempt.errorMessage) {
+      lastErrorMessage = attempt.errorMessage
     }
   }
 
-  incrementLyricsMetric('lrclibNotFound')
+  const seenSearchCandidates = new Set<string>()
+  const searchCandidates = lookupCandidates
+    .map((candidate) => ({
+      artist: candidate.artist,
+      title: candidate.title,
+      duration: candidate.duration,
+    }))
+    .filter((candidate) => {
+      const key = [
+        normalizeLrclibText(candidate.artist),
+        normalizeLrclibText(candidate.title),
+      ].join('|')
+      if (seenSearchCandidates.has(key)) return false
+      seenSearchCandidates.add(key)
+      return true
+    })
+    .slice(0, 2)
+
+  for (const candidate of searchCandidates) {
+    const attempt = await fetchLrclibLyricsBySearch(apiBaseUrl, candidate)
+    if (attempt.status === 'found' && attempt.lyric) {
+      return attempt.lyric
+    }
+    if (attempt.status === 'error' && attempt.errorMessage) {
+      lastErrorMessage = attempt.errorMessage
+    }
+  }
+
   return {
     artist,
     title,
     value: '',
     synced: false,
+    errorMessage: lastErrorMessage,
   }
 }
 

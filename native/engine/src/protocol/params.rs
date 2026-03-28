@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::audio::ParametricEqConfig;
+use crate::audio::{AnalogColorConfig, CrossfeedConfig, ParametricEqConfig};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,7 +35,13 @@ pub struct LoadParams {
     #[serde(default)]
     pub oversampling_filter_id: Option<String>,
     #[serde(default)]
+    pub headroom_db: Option<f32>,
+    #[serde(default)]
+    pub crossfeed: Option<CrossfeedConfig>,
+    #[serde(default)]
     pub parametric_eq: Option<ParametricEqConfig>,
+    #[serde(default)]
+    pub analog_color: Option<AnalogColorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

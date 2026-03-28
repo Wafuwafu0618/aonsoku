@@ -173,6 +173,18 @@ export interface NativeAudioParametricEqConfig {
   bands: NativeAudioParametricEqBand[]
 }
 
+export type NativeAudioAnalogColorPreset = 'light' | 'standard' | 'strong'
+
+export interface NativeAudioAnalogColorConfig {
+  preset: NativeAudioAnalogColorPreset
+}
+
+export type NativeAudioCrossfeedPreset = 'low' | 'medium' | 'high'
+
+export interface NativeAudioCrossfeedConfig {
+  preset: NativeAudioCrossfeedPreset
+}
+
 export interface NativeAudioLoadRequest {
   src: string
   autoplay?: boolean
@@ -182,7 +194,10 @@ export interface NativeAudioLoadRequest {
   durationSeconds?: number
   targetSampleRateHz?: number
   oversamplingFilterId?: string
+  headroomDb?: number
+  crossfeed?: NativeAudioCrossfeedConfig
   parametricEq?: NativeAudioParametricEqConfig
+  analogColor?: NativeAudioAnalogColorConfig
 }
 
 export interface NativeAudioErrorPayload {
@@ -205,6 +220,7 @@ export type NativeAudioEventType =
   | 'ended'
   | 'error'
   | 'deviceChanged'
+  | 'dspMeter'
   | 'relayPcmFormat'
   | 'relayPcmChunk'
 
@@ -217,6 +233,11 @@ export interface NativeAudioEvent {
   channels?: number
   sampleFormat?: 's16le'
   pcmBase64?: string
+  peakDbfs?: number
+  truePeakDbfs?: number
+  clipCountWindow?: number
+  clipCountTotal?: number
+  clippingDetected?: boolean
 }
 
 export interface SpotifyConnectInitializeRequest {

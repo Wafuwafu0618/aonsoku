@@ -9,7 +9,8 @@ use std::thread;
 use url::Url;
 
 use crate::audio::{
-    probe_default_exclusive_open, run_default_exclusive_playback, ParametricEqConfig,
+    probe_default_exclusive_open, run_default_exclusive_playback, AnalogColorConfig,
+    CrossfeedConfig, ParametricEqConfig,
     SharedCpalOutput, SharedPcmTrack,
 };
 use crate::decoder::{
@@ -33,9 +34,12 @@ pub struct ExclusivePlaybackParams {
     pub playback_rate: f64,
     pub loop_enabled: bool,
     pub volume: f32,
+    pub headroom_db: f32,
     pub target_sample_rate_hz: Option<u32>,
     pub oversampling_filter_id: Option<String>,
+    pub crossfeed: Option<CrossfeedConfig>,
     pub parametric_eq: Option<ParametricEqConfig>,
+    pub analog_color: Option<AnalogColorConfig>,
 }
 
 pub struct ExclusivePlaybackSession {
@@ -93,6 +97,24 @@ impl RemoteRelayPcmMode {
     pub fn as_u8(self) -> u8 {
         self as u8
     }
+}
+
+fn db_to_linear(db: f32) -> f32 {
+    10.0_f32.powf(db / 20.0)
+}
+
+fn effective_output_volume(volume: f32, headroom_db: f32) -> f32 {
+    let sanitized_volume = if volume.is_finite() {
+        volume.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let sanitized_headroom_db = if headroom_db.is_finite() {
+        headroom_db.clamp(-24.0, 0.0)
+    } else {
+        0.0
+    };
+    sanitized_volume * db_to_linear(sanitized_headroom_db)
 }
 
 impl Default for AudioRuntime {
@@ -526,9 +548,12 @@ impl AudioRuntime {
             playback_rate: state.playback_rate.max(0.01),
             loop_enabled: state.loop_enabled,
             volume: state.volume as f32,
+            headroom_db: state.headroom_db,
             target_sample_rate_hz: state.target_sample_rate_hz,
             oversampling_filter_id: state.oversampling_filter_id.clone(),
+            crossfeed: state.crossfeed.clone(),
             parametric_eq: state.parametric_eq.clone(),
+            analog_color: state.analog_color.clone(),
         });
         self.exclusive_playback_ended = false;
 
@@ -573,9 +598,12 @@ impl AudioRuntime {
                 params.playback_rate,
                 params.loop_enabled,
                 params.volume,
+                params.headroom_db,
                 params.target_sample_rate_hz,
                 params.oversampling_filter_id,
+                params.crossfeed,
                 params.parametric_eq,
+                params.analog_color,
                 stop_receiver,
                 relay_pcm_enabled,
                 relay_pcm_mode,
@@ -620,13 +648,14 @@ impl AudioRuntime {
             .map(|output| output.underrun_count())
     }
 
-    pub fn set_shared_volume(&mut self, volume: f32) {
+    pub fn set_shared_volume(&mut self, volume: f32, headroom_db: f32) {
         if self.active_output_mode == OutputMode::WasapiExclusive {
             return;
         }
 
         if let Some(shared_output) = &self.shared_cpal_output {
-            shared_output.set_volume(volume);
+            shared_output
+                .set_volume(effective_output_volume(volume, headroom_db));
         }
     }
 
@@ -719,7 +748,7 @@ impl AudioRuntime {
             state.current_time_seconds,
             state.playback_rate,
             state.loop_enabled,
-            state.volume as f32,
+            effective_output_volume(state.volume as f32, state.headroom_db),
         );
 
         Ok(())

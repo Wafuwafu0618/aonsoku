@@ -10,6 +10,9 @@ import {
   createDefaultOversamplingCapability,
   createDefaultOversamplingSettings,
 } from '@/oversampling/defaults'
+import { createDefaultCrossfeedSettings } from '@/crossfeed'
+import { createDefaultAnalogColorSettings } from '@/analog-color'
+import { createDefaultHeadroomSettings } from '@/headroom'
 import { ParametricEqProfile } from '@/parametric-eq'
 import { IPlayerContext, ISongList, LoopState } from '@/types/playerContext'
 import { ISong } from '@/types/responses/song'
@@ -40,6 +43,15 @@ const blurSettings = {
   min: 20,
   max: 100,
   step: 10,
+}
+
+const defaultOutputMeterValues = {
+  peakDbfs: -120,
+  truePeakDbfs: -120,
+  clipCountWindow: 0,
+  clipCountTotal: 0,
+  clippingDetected: false,
+  updatedAtMs: 0,
 }
 
 export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
@@ -209,6 +221,46 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                 },
               },
             },
+            headroom: {
+              values: createDefaultHeadroomSettings(),
+              actions: {
+                setHeadroomDb: (value) => {
+                  set((state) => {
+                    state.settings.headroom.values.headroomDb = clamp(value, -18, 0)
+                  })
+                },
+              },
+            },
+            crossfeed: {
+              values: createDefaultCrossfeedSettings(),
+              actions: {
+                setCrossfeedEnabled: (value) => {
+                  set((state) => {
+                    state.settings.crossfeed.values.enabled = value
+                  })
+                },
+                setCrossfeedPreset: (value) => {
+                  set((state) => {
+                    state.settings.crossfeed.values.preset = value
+                  })
+                },
+              },
+            },
+            analogColor: {
+              values: createDefaultAnalogColorSettings(),
+              actions: {
+                setAnalogColorEnabled: (value) => {
+                  set((state) => {
+                    state.settings.analogColor.values.enabled = value
+                  })
+                },
+                setAnalogColorPreset: (value) => {
+                  set((state) => {
+                    state.settings.analogColor.values.preset = value
+                  })
+                },
+              },
+            },
             parametricEq: {
               values: {
                 enabled: false,
@@ -239,6 +291,25 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
               },
               queue: {
                 useSongColor: false,
+              },
+            },
+          },
+          outputMeter: {
+            values: { ...defaultOutputMeterValues },
+            actions: {
+              setOutputMeter: (value) => {
+                set((state) => {
+                  state.outputMeter.values = {
+                    ...state.outputMeter.values,
+                    ...value,
+                    updatedAtMs: Date.now(),
+                  }
+                })
+              },
+              resetOutputMeter: () => {
+                set((state) => {
+                  state.outputMeter.values = { ...defaultOutputMeterValues }
+                })
               },
             },
           },
@@ -951,10 +1022,15 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
                   createDefaultOversamplingSettings()
                 state.settings.oversampling.capability =
                   createDefaultOversamplingCapability()
+                state.settings.headroom.values = createDefaultHeadroomSettings()
+                state.settings.crossfeed.values = createDefaultCrossfeedSettings()
+                state.settings.analogColor.values =
+                  createDefaultAnalogColorSettings()
                 state.settings.parametricEq.values = {
                   enabled: false,
                   profile: null,
                 }
+                state.outputMeter.values = { ...defaultOutputMeterValues }
               })
             },
             setCurrentSongColor: (value) => {
@@ -1008,6 +1084,7 @@ export const usePlayerStore = createWithEqualityFn<IPlayerContext>()(
           const appStore = omit(state, [
             'songlist',
             'actions',
+            'outputMeter',
             'playerState.isPlaying',
             'state.settings.colors.bigPlayer.blur.settings',
           ])
@@ -1096,6 +1173,30 @@ export const useOversamplingState = () =>
 export const useOversamplingActions = () =>
   usePlayerStore((state) => state.settings.oversampling.actions)
 
+export const useHeadroomState = () =>
+  usePlayerStore((state) => ({
+    ...state.settings.headroom.values,
+  }))
+
+export const useHeadroomActions = () =>
+  usePlayerStore((state) => state.settings.headroom.actions)
+
+export const useCrossfeedState = () =>
+  usePlayerStore((state) => ({
+    ...state.settings.crossfeed.values,
+  }))
+
+export const useCrossfeedActions = () =>
+  usePlayerStore((state) => state.settings.crossfeed.actions)
+
+export const useAnalogColorState = () =>
+  usePlayerStore((state) => ({
+    ...state.settings.analogColor.values,
+  }))
+
+export const useAnalogColorActions = () =>
+  usePlayerStore((state) => state.settings.analogColor.actions)
+
 export const useParametricEqState = () =>
   usePlayerStore((state) => ({
     ...state.settings.parametricEq.values,
@@ -1103,6 +1204,14 @@ export const useParametricEqState = () =>
 
 export const useParametricEqActions = () =>
   usePlayerStore((state) => state.settings.parametricEq.actions)
+
+export const useOutputMeterState = () =>
+  usePlayerStore((state) => ({
+    ...state.outputMeter.values,
+  }))
+
+export const useOutputMeterActions = () =>
+  usePlayerStore((state) => state.outputMeter.actions)
 
 export const useFullscreenPlayerSettings = () =>
   usePlayerStore((state) => state.settings.fullscreen)
@@ -1226,4 +1335,3 @@ export const usePlayerFullscreen = () =>
     setIsFullscreen: state.actions.setIsFullscreen,
     reset: state.actions.resetFullscreen,
   }))
-

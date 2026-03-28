@@ -10,7 +10,11 @@ import {
 } from '@/app/components/ui/popover'
 import { SimpleTooltip } from '@/app/components/ui/simple-tooltip'
 import { cn } from '@/lib/utils'
-import { useOversamplingState, usePlaybackQueueState } from '@/store/player.store'
+import {
+  useOutputMeterState,
+  useOversamplingState,
+  usePlaybackQueueState,
+} from '@/store/player.store'
 import { buildSignalPath, SignalPathQuality } from './signal-path'
 
 interface PlayerSignalPathButtonProps {
@@ -33,6 +37,13 @@ function hasNativeAudioApi(): boolean {
   return typeof api?.nativeAudioInitialize === 'function'
 }
 
+function formatDbfs(value: number): string {
+  if (!Number.isFinite(value) || value <= -119.9) {
+    return '-inf dBFS'
+  }
+  return `${value.toFixed(2)} dBFS`
+}
+
 export function PlayerSignalPathButton({
   disabled,
 }: PlayerSignalPathButtonProps) {
@@ -40,6 +51,13 @@ export function PlayerSignalPathButton({
   const [isOpen, setIsOpen] = useState(false)
   const { currentQueueItem } = usePlaybackQueueState()
   const oversamplingState = useOversamplingState()
+  const {
+    peakDbfs,
+    truePeakDbfs,
+    clipCountWindow,
+    clipCountTotal,
+    clippingDetected,
+  } = useOutputMeterState()
   const signalPath = useMemo(
     () =>
       buildSignalPath({
@@ -120,6 +138,31 @@ export function PlayerSignalPathButton({
             </li>
           ))}
         </ol>
+
+        <div className="mt-4 rounded-md border p-3 space-y-1">
+          <p className="text-xs text-muted-foreground">
+            {t('player.signalPath.meter.title')}
+          </p>
+          <p className="text-sm text-primary">
+            {t('player.signalPath.meter.peak', { value: formatDbfs(peakDbfs) })}
+          </p>
+          <p className="text-sm text-primary">
+            {t('player.signalPath.meter.truePeak', {
+              value: formatDbfs(truePeakDbfs),
+            })}
+          </p>
+          <p
+            className={clsx(
+              'text-xs',
+              clippingDetected ? 'text-red-500' : 'text-muted-foreground',
+            )}
+          >
+            {t('player.signalPath.meter.clips', {
+              window: clipCountWindow,
+              total: clipCountTotal,
+            })}
+          </p>
+        </div>
       </PopoverContent>
     </Popover>
   )

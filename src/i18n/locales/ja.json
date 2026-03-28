@@ -468,6 +468,12 @@
           "title": "Output",
           "description": "WASAPI Exclusive"
         }
+      },
+      "meter": {
+        "title": "出力ピークモニター",
+        "peak": "Peak: {{value}}",
+        "truePeak": "True Peak（近似）: {{value}}",
+        "clips": "Clip数（区間/累計）: {{window}} / {{total}}"
       }
     }
   },
@@ -708,6 +714,14 @@
           "info": "このゲインレベルは、ReplayGainメタデータを含まない曲に適用され、一貫した音量を確保します。推奨されるゲイン範囲は-10dBから-1dBです。"
         }
       },
+      "headroom": {
+        "group": "DSPヘッドルーム",
+        "description": "DSP処理後のクリッピング回避のため、出力前にマイナスゲインを適用します。",
+        "value": {
+          "label": "ヘッドルーム（dB）",
+          "info": "0 dB で無効。クリップが気になる場合は -1 dB 〜 -6 dB を目安に調整してください。"
+        }
+      },
       "oversampling": {
         "group": "オーバーサンプリング",
         "description": "高品質フィルタの設定を選択します（WASAPI共有はOSミキサー経由のため対象外）。",
@@ -780,6 +794,38 @@
             "label": "利用可能出力API",
             "info": "現在の環境で利用可能な出力APIです。"
           }
+        }
+      },
+      "analogColor": {
+        "group": "アナログカラー（Tube / 低域+中域）",
+        "description": "高域はクリーンに保ちつつ、低域と中域にTube系の偶数次高調波を重ねます。現フェーズではWASAPI排他経路のみ適用します。",
+        "enabled": "有効",
+        "preset": {
+          "label": "キャラクター",
+          "options": {
+            "light": "Light",
+            "standard": "Standard",
+            "strong": "Strong"
+          }
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI排他が利用できないため、アナログカラーを無効化しました。"
+        }
+      },
+      "crossfeed": {
+        "group": "クロスフィード（2x2 Matrix FIR）",
+        "description": "ヘッドホン向けのクロスフィードを、オーバーサンプリング前段で2x2マトリクスFIRとして適用します。現フェーズではWASAPI排他経路のみ適用します。",
+        "enabled": "有効",
+        "preset": {
+          "label": "量",
+          "options": {
+            "low": "Low",
+            "medium": "Medium",
+            "high": "High"
+          }
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI排他が利用できないため、クロスフィードを無効化しました。"
         }
       },
       "parametricEq": {

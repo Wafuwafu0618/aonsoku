@@ -73,10 +73,23 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
   private pendingPlay: Promise<void> | null = null
   private currentLoadedSrc: string | null = null
   private outputMode: NativeAudioOutputMode
+  private peakDbfs = -120
+  private truePeakDbfs = -120
+  private clipCountWindow = 0
+  private clipCountTotal = 0
+  private clippingDetected = false
 
   constructor(input: AppleMusicPlaybackBackendInput) {
     this.outputMode = input.outputMode
     this.attachEventListener()
+  }
+
+  private resetDspMeterState(): void {
+    this.peakDbfs = -120
+    this.truePeakDbfs = -120
+    this.clipCountWindow = 0
+    this.clipCountTotal = 0
+    this.clippingDetected = false
   }
 
   private extractAdamId(source: string): string {
@@ -150,6 +163,25 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
     }
     if (event.type === 'timeupdate') {
       this.emit('timeupdate')
+      return
+    }
+    if (event.type === 'dspMeter') {
+      if (typeof event.peakDbfs === 'number') {
+        this.peakDbfs = event.peakDbfs
+      }
+      if (typeof event.truePeakDbfs === 'number') {
+        this.truePeakDbfs = event.truePeakDbfs
+      }
+      if (typeof event.clipCountWindow === 'number') {
+        this.clipCountWindow = Math.max(0, Math.floor(event.clipCountWindow))
+      }
+      if (typeof event.clipCountTotal === 'number') {
+        this.clipCountTotal = Math.max(0, Math.floor(event.clipCountTotal))
+      }
+      if (typeof event.clippingDetected === 'boolean') {
+        this.clippingDetected = event.clippingDetected
+      }
+      this.emit('meter')
       return
     }
     if (event.type === 'play') {
@@ -243,6 +275,7 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
 
     this.errorMessage = undefined
     this.status = 'loading'
+    this.resetDspMeterState()
 
     if (typeof request.loop === 'boolean') {
       this.loop = request.loop
@@ -284,7 +317,10 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
         durationSeconds: resolveResult.durationSeconds ?? request.durationSeconds,
         targetSampleRateHz: request.targetSampleRateHz,
         oversamplingFilterId: request.oversamplingFilterId,
+        headroomDb: request.headroomDb,
+        crossfeed: request.crossfeed,
         parametricEq: request.parametricEq,
+        analogColor: request.analogColor,
       }
       let loadResult = await api.nativeAudioLoad(loadPayload)
 
@@ -434,6 +470,13 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
       volume: clampVolume(this.volume),
       loop: this.loop,
       playbackRate: this.playbackRate,
+      meter: {
+        peakDbfs: this.peakDbfs,
+        truePeakDbfs: this.truePeakDbfs,
+        clipCountWindow: this.clipCountWindow,
+        clipCountTotal: this.clipCountTotal,
+        clippingDetected: this.clippingDetected,
+      },
       error: this.errorMessage,
     }
   }
@@ -453,6 +496,7 @@ export class AppleMusicPlaybackBackend implements PlaybackBackend {
     this.listeners.clear()
     this.status = 'idle'
     this.currentAdamId = null
+    this.resetDspMeterState()
 
     const api = readApi()
     if (!api) return

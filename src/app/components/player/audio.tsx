@@ -21,6 +21,12 @@ import { createSongPlaybackBackend } from '@/playback/backends/song-backend-fact
 import { PlayerAudioPipeline } from '@/playback/pipeline'
 import { PlaybackEvent } from '@/playback/session-types'
 import {
+  useAnalogColorActions,
+  useAnalogColorState,
+  useCrossfeedActions,
+  useCrossfeedState,
+  useHeadroomState,
+  useOutputMeterActions,
   usePlaybackQueueState,
   usePlayerActions,
   usePlayerIsPlaying,
@@ -101,6 +107,9 @@ function resolveTargetSampleRateHz(
 function shouldUseNativeBackendForSong(
   isSong: boolean,
   oversamplingEnabled: boolean,
+  headroomDb: number,
+  crossfeedEnabled: boolean,
+  analogColorEnabled: boolean,
   parametricEqEnabled: boolean,
   nativeApiAvailable: boolean,
   outputApi: NativeAudioOutputMode,
@@ -111,6 +120,15 @@ function shouldUseNativeBackendForSong(
   }
 
   if (parametricEqEnabled) {
+    return true
+  }
+  if (headroomDb < -0.001) {
+    return true
+  }
+  if (crossfeedEnabled) {
+    return true
+  }
+  if (analogColorEnabled) {
     return true
   }
 
@@ -174,6 +192,15 @@ export function AudioPlayer({
     enabled: parametricEqEnabled,
     profile: parametricEqProfile,
   } = useParametricEqState()
+  const {
+    enabled: crossfeedEnabled,
+    preset: crossfeedPreset,
+  } = useCrossfeedState()
+  const { headroomDb } = useHeadroomState()
+  const {
+    enabled: analogColorEnabled,
+    preset: analogColorPreset,
+  } = useAnalogColorState()
   const { isSong, isRadio, isPodcast } = usePlayerMediaType()
   const { currentQueueItem } = usePlaybackQueueState()
   const { setPlayingState, setCurrentDuration, setProgress, handleSongEnded } =
@@ -181,6 +208,9 @@ export function AudioPlayer({
   const { setCapability, setEnabled, setEnginePreference, setOutputApi } =
     useOversamplingActions()
   const { setParametricEqEnabled } = useParametricEqActions()
+  const { setCrossfeedEnabled } = useCrossfeedActions()
+  const { setAnalogColorEnabled } = useAnalogColorActions()
+  const { setOutputMeter, resetOutputMeter } = useOutputMeterActions()
   const { setReplayGainEnabled, setReplayGainError } = useReplayGainActions()
   const { volume } = usePlayerVolume()
   const isPlaying = usePlayerIsPlaying()
@@ -194,7 +224,9 @@ export function AudioPlayer({
 
   const nativeApiAvailable = hasNativeAudioApi()
 
-  const nativeOutputMode = (parametricEqEnabled
+  const nativeOutputMode = (parametricEqEnabled ||
+  crossfeedEnabled ||
+  analogColorEnabled
     ? 'wasapi-exclusive'
     : oversamplingOutputApi) as NativeAudioOutputMode
   const oversamplingTargetSampleRateHz = oversamplingEnabled
@@ -216,10 +248,17 @@ export function AudioPlayer({
   const useNativeSongBackend = shouldUseNativeBackendForSong(
     isSong,
     oversamplingEnabled,
+    headroomDb,
+    crossfeedEnabled,
+    analogColorEnabled,
     parametricEqEnabled,
     nativeApiAvailable,
     nativeOutputMode,
     isSelectedOutputApiSupported,
+  )
+  const headroomForLoad = useMemo(
+    () => Math.min(0, Math.max(-18, headroomDb)),
+    [headroomDb],
   )
   const parametricEqLoadConfig = useMemo(() => {
     if (!parametricEqEnabled || !parametricEqProfile) {
@@ -242,6 +281,26 @@ export function AudioPlayer({
   )
   const parametricEqForLoad = shouldApplyParametricEq
     ? parametricEqLoadConfig
+    : undefined
+  const crossfeedLoadConfig = useMemo(() => {
+    return {
+      preset: crossfeedPreset,
+    }
+  }, [crossfeedPreset])
+  const shouldApplyCrossfeed =
+    crossfeedEnabled && nativeOutputMode === 'wasapi-exclusive'
+  const crossfeedForLoad = shouldApplyCrossfeed
+    ? crossfeedLoadConfig
+    : undefined
+  const analogColorLoadConfig = useMemo(() => {
+    return {
+      preset: analogColorPreset,
+    }
+  }, [analogColorPreset])
+  const shouldApplyAnalogColor =
+    analogColorEnabled && nativeOutputMode === 'wasapi-exclusive'
+  const analogColorForLoad = shouldApplyAnalogColor
+    ? analogColorLoadConfig
     : undefined
   const useSpotifyConnectSongBackend =
     isSong &&
@@ -553,6 +612,7 @@ export function AudioPlayer({
     if (!backend) return
 
     async function configureAndLoadSong(): Promise<void> {
+      resetOutputMeter()
       try {
         if (backend instanceof NativePlaybackBackend) {
           await backend.setOutputMode(nativeOutputMode)
@@ -566,6 +626,14 @@ export function AudioPlayer({
               setParametricEqEnabled(false)
               toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
             }
+            if (resolvedMode === 'wasapi-shared' && crossfeedEnabled) {
+              setCrossfeedEnabled(false)
+              toast.warn(t('settings.audio.crossfeed.runtime.exclusiveOnly'))
+            }
+            if (resolvedMode === 'wasapi-shared' && analogColorEnabled) {
+              setAnalogColorEnabled(false)
+              toast.warn(t('settings.audio.analogColor.runtime.exclusiveOnly'))
+            }
           }
         }
 
@@ -577,7 +645,10 @@ export function AudioPlayer({
           autoplay: isPlayingRef.current,
           targetSampleRateHz: oversamplingTargetSampleRateHz,
           oversamplingFilterId,
+          headroomDb: headroomForLoad,
+          crossfeed: crossfeedForLoad,
           parametricEq: parametricEqForLoad,
+          analogColor: analogColorForLoad,
         })
 
         if (backend instanceof NativePlaybackBackend) {
@@ -590,6 +661,14 @@ export function AudioPlayer({
             if (resolvedMode === 'wasapi-shared' && parametricEqEnabled) {
               setParametricEqEnabled(false)
               toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
+            }
+            if (resolvedMode === 'wasapi-shared' && crossfeedEnabled) {
+              setCrossfeedEnabled(false)
+              toast.warn(t('settings.audio.crossfeed.runtime.exclusiveOnly'))
+            }
+            if (resolvedMode === 'wasapi-shared' && analogColorEnabled) {
+              setAnalogColorEnabled(false)
+              toast.warn(t('settings.audio.analogColor.runtime.exclusiveOnly'))
             }
           }
         }
@@ -617,6 +696,14 @@ export function AudioPlayer({
               setParametricEqEnabled(false)
               toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
             }
+            if (crossfeedEnabled) {
+              setCrossfeedEnabled(false)
+              toast.warn(t('settings.audio.crossfeed.runtime.exclusiveOnly'))
+            }
+            if (analogColorEnabled) {
+              setAnalogColorEnabled(false)
+              toast.warn(t('settings.audio.analogColor.runtime.exclusiveOnly'))
+            }
           }
 
           await backend.load({
@@ -625,7 +712,10 @@ export function AudioPlayer({
             autoplay: isPlayingRef.current,
             targetSampleRateHz: oversamplingTargetSampleRateHz,
             oversamplingFilterId,
+            headroomDb: headroomForLoad,
+            crossfeed: undefined,
             parametricEq: undefined,
+            analogColor: undefined,
           })
 
           if (backend instanceof NativePlaybackBackend) {
@@ -638,6 +728,14 @@ export function AudioPlayer({
               if (resolvedMode === 'wasapi-shared' && parametricEqEnabled) {
                 setParametricEqEnabled(false)
                 toast.warn(t('settings.audio.parametricEq.runtime.exclusiveOnly'))
+              }
+              if (resolvedMode === 'wasapi-shared' && crossfeedEnabled) {
+                setCrossfeedEnabled(false)
+                toast.warn(t('settings.audio.crossfeed.runtime.exclusiveOnly'))
+              }
+              if (resolvedMode === 'wasapi-shared' && analogColorEnabled) {
+                setAnalogColorEnabled(false)
+                toast.warn(t('settings.audio.analogColor.runtime.exclusiveOnly'))
               }
             }
           }
@@ -668,15 +766,23 @@ export function AudioPlayer({
     handleSongError,
     isSong,
     loop,
+    headroomForLoad,
     nativeOutputMode,
+    crossfeedEnabled,
+    crossfeedForLoad,
+    analogColorEnabled,
+    analogColorForLoad,
     oversamplingEnabled,
     oversamplingFilterId,
     oversamplingTargetSampleRateHz,
     parametricEqEnabled,
     parametricEqForLoad,
+    setCrossfeedEnabled,
+    setAnalogColorEnabled,
     setEnabled,
     setParametricEqEnabled,
     setOutputApi,
+    resetOutputMeter,
     src,
     t,
     useAppleMusicSongBackend,
@@ -684,10 +790,13 @@ export function AudioPlayer({
     useSpotifyConnectSongBackend,
   ])
   useEffect(() => {
-    if (!isSong) return
+    if (!isSong) {
+      resetOutputMeter()
+      return
+    }
 
     songBackendRef.current?.setVolume(volume / 100)
-  }, [isSong, volume])
+  }, [isSong, resetOutputMeter, volume])
 
   const handleRadioError = useCallback(() => {
     const audio = audioRef.current
@@ -721,6 +830,13 @@ export function AudioPlayer({
         return
       }
 
+      if (type === 'meter') {
+        if (snapshot.meter) {
+          setOutputMeter(snapshot.meter)
+        }
+        return
+      }
+
       if (type === 'pause' && snapshot.status !== 'ended') {
         setPlayingState(false)
         return
@@ -749,6 +865,7 @@ export function AudioPlayer({
     handleSongEnded,
     handleSongError,
     isSong,
+    setOutputMeter,
     src,
     setCurrentDuration,
     setPlayingState,

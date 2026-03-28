@@ -10,6 +10,9 @@ import {
   OversamplingSettingsValues,
   OversamplingTargetRatePolicy,
 } from '@/oversampling/types'
+import { CrossfeedPreset, CrossfeedSettingsValues } from '@/crossfeed'
+import { AnalogColorPreset, AnalogColorSettingsValues } from '@/analog-color'
+import { HeadroomSettingsValues } from '@/headroom'
 import { ParametricEqProfile } from '@/parametric-eq'
 
 export enum LoopState {
@@ -99,6 +102,18 @@ interface IOversampling {
   actions: IOversamplingActions
 }
 
+interface ICrossfeedData extends CrossfeedSettingsValues {}
+
+interface ICrossfeedActions {
+  setCrossfeedEnabled: (value: boolean) => void
+  setCrossfeedPreset: (value: CrossfeedPreset) => void
+}
+
+interface ICrossfeed {
+  values: ICrossfeedData
+  actions: ICrossfeedActions
+}
+
 interface IParametricEqData {
   enabled: boolean
   profile: ParametricEqProfile | null
@@ -112,6 +127,48 @@ interface IParametricEqActions {
 interface IParametricEq {
   values: IParametricEqData
   actions: IParametricEqActions
+}
+
+interface IAnalogColorData extends AnalogColorSettingsValues {}
+
+interface IAnalogColorActions {
+  setAnalogColorEnabled: (value: boolean) => void
+  setAnalogColorPreset: (value: AnalogColorPreset) => void
+}
+
+interface IAnalogColor {
+  values: IAnalogColorData
+  actions: IAnalogColorActions
+}
+
+interface IHeadroomData extends HeadroomSettingsValues {}
+
+interface IHeadroomActions {
+  setHeadroomDb: (value: number) => void
+}
+
+interface IHeadroom {
+  values: IHeadroomData
+  actions: IHeadroomActions
+}
+
+interface IOutputMeterData {
+  peakDbfs: number
+  truePeakDbfs: number
+  clipCountWindow: number
+  clipCountTotal: number
+  clippingDetected: boolean
+  updatedAtMs: number
+}
+
+interface IOutputMeterActions {
+  setOutputMeter: (value: Partial<IOutputMeterData>) => void
+  resetOutputMeter: () => void
+}
+
+interface IOutputMeter {
+  values: IOutputMeterData
+  actions: IOutputMeterActions
 }
 
 interface IFullscreen {
@@ -168,6 +225,9 @@ export interface IPlayerSettings {
   lyrics: ILyrics
   replayGain: IReplayGain
   oversampling: IOversampling
+  headroom: IHeadroom
+  crossfeed: ICrossfeed
+  analogColor: IAnalogColor
   parametricEq: IParametricEq
   privacy: IPrivacySettings
   colors: IColorsSettings
@@ -248,5 +308,6 @@ export interface IPlayerContext {
   playerProgress: IPlayerProgress
   listenTime: IListenTime
   settings: IPlayerSettings
+  outputMeter: IOutputMeter
   actions: IPlayerActions
 }

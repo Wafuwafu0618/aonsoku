@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::audio::ParametricEqConfig;
+use crate::audio::{AnalogColorConfig, CrossfeedConfig, ParametricEqConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -50,7 +50,10 @@ pub struct EngineState {
     pub duration_seconds: f64,
     pub target_sample_rate_hz: Option<u32>,
     pub oversampling_filter_id: Option<String>,
+    pub headroom_db: f32,
+    pub crossfeed: Option<CrossfeedConfig>,
     pub parametric_eq: Option<ParametricEqConfig>,
+    pub analog_color: Option<AnalogColorConfig>,
     pub last_tick_instant: Option<Instant>,
 }
 
@@ -68,7 +71,10 @@ impl Default for EngineState {
             duration_seconds: 0.0,
             target_sample_rate_hz: None,
             oversampling_filter_id: None,
+            headroom_db: 0.0,
+            crossfeed: None,
             parametric_eq: None,
+            analog_color: None,
             last_tick_instant: None,
         }
     }
@@ -92,7 +98,10 @@ impl EngineState {
         self.duration_seconds = 0.0;
         self.target_sample_rate_hz = None;
         self.oversampling_filter_id = None;
+        self.headroom_db = 0.0;
+        self.crossfeed = None;
         self.parametric_eq = None;
+        self.analog_color = None;
         self.last_tick_instant = None;
     }
 

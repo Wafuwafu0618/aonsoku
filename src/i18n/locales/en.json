@@ -438,6 +438,41 @@
       "volume": {
         "mute": "Mute",
         "unmute": "Unmute"
+      },
+      "signalPath": "Show signal path"
+    },
+    "signalPath": {
+      "title": "Signal Path: {{quality}}",
+      "subtitle": "Shows each stage in the playback pipeline.",
+      "quality": {
+        "lossless": "Lossless",
+        "enhanced": "Enhanced",
+        "lossy": "Lossy",
+        "warning": "Warning"
+      },
+      "stages": {
+        "source": {
+          "title": "Source",
+          "description": "TIDAL FLAC 44.1kHz 16bit 2ch"
+        },
+        "engine": {
+          "title": "Engine",
+          "description": "Native Audio Engine"
+        },
+        "dsp": {
+          "title": "DSP",
+          "description": "Oversampling (HQ Sinc)"
+        },
+        "output": {
+          "title": "Output",
+          "description": "WASAPI Exclusive"
+        }
+      },
+      "meter": {
+        "title": "Output Peak Monitor",
+        "peak": "Peak: {{value}}",
+        "truePeak": "True Peak (approx): {{value}}",
+        "clips": "Clips (window/total): {{window}} / {{total}}"
       }
     }
   },
@@ -675,6 +710,46 @@
         "defaultGain": {
           "label": "Default Gain (dB)",
           "info": "This gain level is applied to songs that do not include ReplayGain metadata, ensuring consistent audio volume. The recommended range for gain is between -10 dB and -1 dB."
+        }
+      },
+      "headroom": {
+        "group": "DSP Headroom",
+        "description": "Applies negative gain before output to reduce clipping risk when DSP is active.",
+        "value": {
+          "label": "Headroom (dB)",
+          "info": "0 dB disables headroom. Use -1 dB to -6 dB when clipping risk is high."
+        }
+      },
+      "analogColor": {
+        "group": "Analog Color (Tube, Low+Mid Bands)",
+        "description": "Adds tube-like even harmonics to low and mid frequencies while keeping highs clean. Available on WASAPI exclusive path only.",
+        "enabled": "Enabled",
+        "preset": {
+          "label": "Character",
+          "options": {
+            "light": "Light",
+            "standard": "Standard",
+            "strong": "Strong"
+          }
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI exclusive is unavailable. Analog Color has been disabled."
+        }
+      },
+      "crossfeed": {
+        "group": "Crossfeed (2x2 Matrix FIR)",
+        "description": "Applies headphone crossfeed before oversampling using a stereo 2x2 matrix FIR block. Available on WASAPI exclusive path only.",
+        "enabled": "Enabled",
+        "preset": {
+          "label": "Amount",
+          "options": {
+            "low": "Low",
+            "medium": "Medium",
+            "high": "High"
+          }
+        },
+        "runtime": {
+          "exclusiveOnly": "WASAPI exclusive is unavailable. Crossfeed has been disabled."
         }
       },
       "parametricEq": {

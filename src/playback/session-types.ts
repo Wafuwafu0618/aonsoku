@@ -15,6 +15,26 @@ export interface PlaybackParametricEqConfig {
   bands: PlaybackParametricEqBand[]
 }
 
+export type PlaybackAnalogColorPreset = 'light' | 'standard' | 'strong'
+
+export interface PlaybackAnalogColorConfig {
+  preset: PlaybackAnalogColorPreset
+}
+
+export type PlaybackCrossfeedPreset = 'low' | 'medium' | 'high'
+
+export interface PlaybackCrossfeedConfig {
+  preset: PlaybackCrossfeedPreset
+}
+
+export interface PlaybackDspMeter {
+  peakDbfs: number
+  truePeakDbfs: number
+  clipCountWindow: number
+  clipCountTotal: number
+  clippingDetected: boolean
+}
+
 export type PlaybackStatus =
   | 'idle'
   | 'loading'
@@ -33,7 +53,10 @@ export interface PlaybackLoadRequest {
   durationSeconds?: number
   targetSampleRateHz?: number
   oversamplingFilterId?: string
+  headroomDb?: number
+  crossfeed?: PlaybackCrossfeedConfig
   parametricEq?: PlaybackParametricEqConfig
+  analogColor?: PlaybackAnalogColorConfig
 }
 
 export interface PlaybackSnapshot {
@@ -45,6 +68,7 @@ export interface PlaybackSnapshot {
   volume: number
   loop: boolean
   playbackRate: number
+  meter?: PlaybackDspMeter
   error?: string
 }
 
@@ -55,6 +79,7 @@ export type PlaybackEventType =
   | 'pause'
   | 'ended'
   | 'error'
+  | 'meter'
 
 export interface PlaybackEvent {
   type: PlaybackEventType

@@ -166,13 +166,29 @@ export class NativePlaybackBackend implements PlaybackBackend {
   private currentSource: string | null = null
   private currentTargetSampleRateHz: number | undefined
   private currentOversamplingFilterId: string | undefined
+  private currentHeadroomDb: number | undefined
+  private currentCrossfeedSignature: string | undefined
   private currentParametricEqSignature: string | undefined
+  private currentAnalogColorSignature: string | undefined
+  private peakDbfs = -120
+  private truePeakDbfs = -120
+  private clipCountWindow = 0
+  private clipCountTotal = 0
+  private clippingDetected = false
 
   private outputMode: NativeAudioOutputMode
 
   constructor(options: NativePlaybackBackendOptions) {
     this.outputMode = options.outputMode
     this.attachEventListener()
+  }
+
+  private resetDspMeterState(): void {
+    this.peakDbfs = -120
+    this.truePeakDbfs = -120
+    this.clipCountWindow = 0
+    this.clipCountTotal = 0
+    this.clippingDetected = false
   }
 
   private async setOutputModeWithFallback(
@@ -358,6 +374,26 @@ export class NativePlaybackBackend implements PlaybackBackend {
       return
     }
 
+    if (event.type === 'dspMeter') {
+      if (typeof event.peakDbfs === 'number') {
+        this.peakDbfs = event.peakDbfs
+      }
+      if (typeof event.truePeakDbfs === 'number') {
+        this.truePeakDbfs = event.truePeakDbfs
+      }
+      if (typeof event.clipCountWindow === 'number') {
+        this.clipCountWindow = Math.max(0, Math.floor(event.clipCountWindow))
+      }
+      if (typeof event.clipCountTotal === 'number') {
+        this.clipCountTotal = Math.max(0, Math.floor(event.clipCountTotal))
+      }
+      if (typeof event.clippingDetected === 'boolean') {
+        this.clippingDetected = event.clippingDetected
+      }
+      this.emit('meter')
+      return
+    }
+
     if (event.type === 'play') {
       this.status = 'playing'
       this.isPlaying = true
@@ -471,17 +507,32 @@ export class NativePlaybackBackend implements PlaybackBackend {
       request.oversamplingFilterId.length > 0
         ? request.oversamplingFilterId
         : undefined
+    const requestedHeadroomDb =
+      typeof request.headroomDb === 'number'
+        ? request.headroomDb
+        : undefined
+    const requestedCrossfeedSignature = request.crossfeed
+      ? JSON.stringify(request.crossfeed)
+      : undefined
     const requestedParametricEqSignature =
       request.parametricEq && request.parametricEq.bands.length > 0
         ? JSON.stringify(request.parametricEq)
         : undefined
+    const requestedAnalogColorSignature = request.analogColor
+      ? JSON.stringify(request.analogColor)
+      : undefined
     const sameSource = this.currentSource === normalizedSrc
     const sameTargetRate =
       this.currentTargetSampleRateHz === requestedTargetSampleRateHz
     const sameOversamplingFilter =
       this.currentOversamplingFilterId === requestedOversamplingFilterId
+    const sameHeadroom = this.currentHeadroomDb === requestedHeadroomDb
+    const sameCrossfeed =
+      this.currentCrossfeedSignature === requestedCrossfeedSignature
     const sameParametricEq =
       this.currentParametricEqSignature === requestedParametricEqSignature
+    const sameAnalogColor =
+      this.currentAnalogColorSignature === requestedAnalogColorSignature
     const sameLoop =
       typeof request.loop !== 'boolean' || request.loop === this.loop
     const samePlaybackRate =
@@ -495,7 +546,10 @@ export class NativePlaybackBackend implements PlaybackBackend {
       sameSource &&
       sameTargetRate &&
       sameOversamplingFilter &&
+      sameHeadroom &&
+      sameCrossfeed &&
       sameParametricEq &&
+      sameAnalogColor &&
       sameLoop &&
       samePlaybackRate &&
       !hasExplicitSeek
@@ -513,6 +567,7 @@ export class NativePlaybackBackend implements PlaybackBackend {
 
     this.status = 'loading'
     this.errorMessage = undefined
+    this.resetDspMeterState()
 
     if (typeof request.loop === 'boolean') {
       this.loop = request.loop
@@ -558,7 +613,10 @@ export class NativePlaybackBackend implements PlaybackBackend {
         this.currentSource = normalizedSrc
         this.currentTargetSampleRateHz = requestedTargetSampleRateHz
         this.currentOversamplingFilterId = requestedOversamplingFilterId
+        this.currentHeadroomDb = requestedHeadroomDb
+        this.currentCrossfeedSignature = requestedCrossfeedSignature
         this.currentParametricEqSignature = requestedParametricEqSignature
+        this.currentAnalogColorSignature = requestedAnalogColorSignature
         return
       }
 
@@ -571,7 +629,10 @@ export class NativePlaybackBackend implements PlaybackBackend {
       this.currentSource = normalizedSrc
       this.currentTargetSampleRateHz = requestedTargetSampleRateHz
       this.currentOversamplingFilterId = requestedOversamplingFilterId
+      this.currentHeadroomDb = requestedHeadroomDb
+      this.currentCrossfeedSignature = requestedCrossfeedSignature
       this.currentParametricEqSignature = requestedParametricEqSignature
+      this.currentAnalogColorSignature = requestedAnalogColorSignature
     } catch (error) {
       const payload = toErrorPayload(
         error,
@@ -581,7 +642,10 @@ export class NativePlaybackBackend implements PlaybackBackend {
       this.currentSource = null
       this.currentTargetSampleRateHz = undefined
       this.currentOversamplingFilterId = undefined
+      this.currentHeadroomDb = undefined
+      this.currentCrossfeedSignature = undefined
       this.currentParametricEqSignature = undefined
+      this.currentAnalogColorSignature = undefined
       this.status = 'error'
       this.errorMessage = payload.message
       this.emit('error')
@@ -714,6 +778,13 @@ export class NativePlaybackBackend implements PlaybackBackend {
       volume: clampVolume(this.volume),
       loop: this.loop,
       playbackRate: this.playbackRate,
+      meter: {
+        peakDbfs: this.peakDbfs,
+        truePeakDbfs: this.truePeakDbfs,
+        clipCountWindow: this.clipCountWindow,
+        clipCountTotal: this.clipCountTotal,
+        clippingDetected: this.clippingDetected,
+      },
       error: this.errorMessage,
     }
   }
@@ -736,7 +807,11 @@ export class NativePlaybackBackend implements PlaybackBackend {
     this.currentSource = null
     this.currentTargetSampleRateHz = undefined
     this.currentOversamplingFilterId = undefined
+    this.currentHeadroomDb = undefined
+    this.currentCrossfeedSignature = undefined
     this.currentParametricEqSignature = undefined
+    this.currentAnalogColorSignature = undefined
+    this.resetDspMeterState()
 
     const api = readApi()
     if (!api) return

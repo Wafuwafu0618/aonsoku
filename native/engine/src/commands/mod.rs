@@ -282,6 +282,27 @@ pub fn handle_command(
                             return Ok(());
                         }
                     }
+                    let requested_headroom_db = params
+                        .headroom_db
+                        .unwrap_or(0.0)
+                        .clamp(-24.0, 0.0);
+                    if let Some(headroom_db) = params.headroom_db {
+                        if !headroom_db.is_finite()
+                            || !(-24.0..=0.0).contains(&headroom_db)
+                        {
+                            emit_command_error(
+                                &request.id,
+                                "invalid-headroom",
+                                "headroomDb must be a finite number in range [-24, 0].",
+                                Some(
+                                    serde_json::json!({
+                                        "headroomDb": headroom_db
+                                    }),
+                                ),
+                            )?;
+                            return Ok(());
+                        }
+                    }
 
                     let mut requested_parametric_eq = params.parametric_eq.clone();
                     if let Some(parametric_eq) = requested_parametric_eq.as_ref() {
@@ -302,6 +323,30 @@ pub fn handle_command(
                             requested_parametric_eq = None;
                         }
                     }
+                    let requested_crossfeed = params.crossfeed.clone();
+                    if let Some(crossfeed) = requested_crossfeed.as_ref() {
+                        if let Err(message) = crossfeed.validate() {
+                            emit_command_error(
+                                &request.id,
+                                "invalid-crossfeed",
+                                message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
+                    }
+                    let requested_analog_color = params.analog_color.clone();
+                    if let Some(analog_color) = requested_analog_color.as_ref() {
+                        if let Err(message) = analog_color.validate() {
+                            emit_command_error(
+                                &request.id,
+                                "invalid-analog-color",
+                                message,
+                                None,
+                            )?;
+                            return Ok(());
+                        }
+                    }
 
                     let requested_playback_rate = params.playback_rate.unwrap_or(1.0);
                     let requested_loop = params.loop_value;
@@ -319,7 +364,10 @@ pub fn handle_command(
                         && state.target_sample_rate_hz == params.target_sample_rate_hz
                         && state.oversampling_filter_id.as_deref()
                             == requested_oversampling_filter_id.as_deref()
+                        && (state.headroom_db - requested_headroom_db).abs() < f32::EPSILON
+                        && state.crossfeed == requested_crossfeed
                         && state.parametric_eq == requested_parametric_eq
+                        && state.analog_color == requested_analog_color
                         && state.loop_enabled == requested_loop
                         && (state.playback_rate - requested_playback_rate).abs() < f64::EPSILON;
 
@@ -436,7 +484,10 @@ pub fn handle_command(
                     state.duration_seconds = duration_seconds;
                     state.target_sample_rate_hz = params.target_sample_rate_hz;
                     state.oversampling_filter_id = requested_oversampling_filter_id;
+                    state.headroom_db = requested_headroom_db;
+                    state.crossfeed = requested_crossfeed;
                     state.parametric_eq = requested_parametric_eq;
+                    state.analog_color = requested_analog_color;
                     state.set_current_time(requested_start);
                     state.last_tick_instant = None;
 
@@ -686,7 +737,10 @@ pub fn handle_command(
                         }
                     }
                 } else {
-                    runtime.set_shared_volume(params.volume as f32);
+                    runtime.set_shared_volume(
+                        params.volume as f32,
+                        state.headroom_db,
+                    );
                 }
 
                 emit_response_ok(&request.id, Some(command_result_ok_value()))?;

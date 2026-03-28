@@ -29,6 +29,11 @@ pub fn emit_event(
             channels: None,
             sample_format: None,
             pcm_base64: None,
+            peak_dbfs: None,
+            true_peak_dbfs: None,
+            clip_count_window: None,
+            clip_count_total: None,
+            clipping_detected: None,
             error,
         },
     };
@@ -58,6 +63,11 @@ pub fn emit_relay_pcm_format(
             channels: Some(channels),
             sample_format: Some(sample_format.to_string()),
             pcm_base64: None,
+            peak_dbfs: None,
+            true_peak_dbfs: None,
+            clip_count_window: None,
+            clip_count_total: None,
+            clipping_detected: None,
             error: None,
         },
     })
@@ -80,6 +90,38 @@ pub fn emit_relay_pcm_chunk(
             channels: Some(channels),
             sample_format: Some(sample_format.to_string()),
             pcm_base64: Some(encoded),
+            peak_dbfs: None,
+            true_peak_dbfs: None,
+            clip_count_window: None,
+            clip_count_total: None,
+            clipping_detected: None,
+            error: None,
+        },
+    })
+}
+
+pub fn emit_dsp_meter_event(
+    peak_dbfs: f32,
+    true_peak_dbfs: f32,
+    clip_count_window: u64,
+    clip_count_total: u64,
+    clipping_detected: bool,
+) -> io::Result<()> {
+    write_json_line(&SidecarEventEnvelope {
+        kind: "event".to_string(),
+        event: NativeAudioEvent {
+            event_type: "dspMeter".to_string(),
+            current_time_seconds: None,
+            duration_seconds: None,
+            sample_rate_hz: None,
+            channels: None,
+            sample_format: None,
+            pcm_base64: None,
+            peak_dbfs: Some(peak_dbfs),
+            true_peak_dbfs: Some(true_peak_dbfs),
+            clip_count_window: Some(clip_count_window),
+            clip_count_total: Some(clip_count_total),
+            clipping_detected: Some(clipping_detected),
             error: None,
         },
     })
